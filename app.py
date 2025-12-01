@@ -18,12 +18,17 @@ app.add_middleware(
     allow_origins=[
         "https://royaltiesagent.com",
         "https://www.royaltiesagent.com",
-        "https://staging.royaltiesagent.com"
+        "https://staging.royaltiesagent.com",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000"
     ],
-    
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,
 )
 
 app.include_router(stripe_router,   prefix="/api/stripe",     tags=["Stripe Billing"])
@@ -35,3 +40,11 @@ app.include_router(licenses_router, prefix="/api/licenses", tags=["Licenses"])
 @app.get("/")
 def root():
     return {"message": "API is running!"}
+
+@app.get("/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "message": "Royalties Automation API is running",
+        "version": "1.0.0"
+    }
