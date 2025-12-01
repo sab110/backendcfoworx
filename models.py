@@ -1,13 +1,12 @@
 # models.py
 from sqlalchemy import (
-    Column, Integer, String, ForeignKey, TIMESTAMP, Text, func, DateTime
+    Column, Integer, String, ForeignKey, TIMESTAMP, Text, func, DateTime, JSON
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime, timedelta
 from db import Base
 
-Base = declarative_base()
 
 # ------------------------------------------------------
 # USER MODEL
@@ -26,13 +25,6 @@ class User(Base):
     # ✅ Fix: Reference QuickBooksToken instead of QuickBooksOAuth
     quickbooks_token = relationship(
         "QuickBooksToken",
-        back_populates="user",
-        uselist=False,
-        cascade="all, delete-orphan"
-    )
-
-    subscription = relationship(
-        "Subscription",
         back_populates="user",
         uselist=False,
         cascade="all, delete-orphan"
@@ -94,13 +86,13 @@ class Plan(Base):
 
 
 # ------------------------------------------------------
-# SUBSCRIPTION MODEL
+# SUBSCRIPTION MODEL (Company-Level)
 # ------------------------------------------------------
 class Subscription(Base):
     __tablename__ = "subscriptions"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    realm_id = Column(String, ForeignKey("company_info.realm_id", ondelete="CASCADE"), nullable=False, unique=True)
     plan_id = Column(Integer, ForeignKey("plans.id"), nullable=True)
     stripe_subscription_id = Column(String(100), unique=True, nullable=True)
     stripe_customer_id = Column(String(100), nullable=True)
@@ -110,8 +102,115 @@ class Subscription(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, onupdate=func.now())
 
-    user = relationship("User", back_populates="subscription")
+    # Relationships
+    company = relationship("CompanyInfo", back_populates="subscription")
     plan = relationship("Plan", back_populates="subscriptions")
 
     def __repr__(self):
-        return f"<Subscription(user_id={self.user_id}, status='{self.status}')>"
+        return f"<Subscription(realm_id={self.realm_id}, status='{self.status}')>"
+
+
+# ------------------------------------------------------
+# QUICKBOOKS COMPANY INFO MODEL
+# ------------------------------------------------------
+class CompanyInfo(Base):
+    __tablename__ = "company_info"
+
+    id = Column(Integer, primary_key=True, index=True)
+    realm_id = Column(String, ForeignKey("quickbooks_tokens.realm_id", ondelete="CASCADE"), nullable=False, unique=True)
+    
+    # Basic Company Information
+    company_name = Column(String(255), nullable=True)
+    legal_name = Column(String(255), nullable=True)
+    employer_id = Column(String(100), nullable=True)  # Tax ID
+    
+    # Address Information (stored as JSON for flexibility)
+    company_addr = Column(JSON, nullable=True)
+    legal_addr = Column(JSON, nullable=True)
+    customer_communication_addr = Column(JSON, nullable=True)
+    
+    # Contact Information
+    email = Column(String(255), nullable=True)
+    customer_communication_email = Column(String(255), nullable=True)
+    primary_phone = Column(String(50), nullable=True)
+    web_addr = Column(String(255), nullable=True)
+    
+    # Company Details
+    company_start_date = Column(String(50), nullable=True)
+    fiscal_year_start_month = Column(String(50), nullable=True)
+    country = Column(String(10), nullable=True)
+    supported_languages = Column(String(50), nullable=True)
+    default_timezone = Column(String(100), nullable=True)
+    
+    # QuickBooks Metadata
+    qbo_id = Column(String(50), nullable=True)  # QuickBooks ID
+    sync_token = Column(String(50), nullable=True)
+    domain = Column(String(50), nullable=True)
+    
+    # Additional metadata (NameValue pairs, etc.)
+    # metadata = Column(JSON, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_synced_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    subscription = relationship(
+        "Subscription",
+        back_populates="company",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+
+    def __repr__(self):
+        return f"<CompanyInfo(realm_id='{self.realm_id}', company_name='{self.company_name}')>"
+
+
+# ------------------------------------------------------
+# LICENSE MODEL
+# ------------------------------------------------------
+class License(Base):
+    __tablename__ = "licenses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    franchise_number = Column(String(50), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=True)
+    owner = Column(String(255), nullable=True)
+    address = Column(String(500), nullable=True)
+    city = Column(String(100), nullable=True)
+    state = Column(String(10), nullable=True)
+    zip_code = Column(String(20), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<License(franchise_number='{self.franchise_number}', name='{self.name}')>"
+
+
+
+
+# ------------------------------------------------------
+# COMPANY-LICENSE MAPPING MODEL
+# ------------------------------------------------------
+class CompanyLicenseMapping(Base):
+    __tablename__ = "company_license_mappings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    realm_id = Column(String, ForeignKey("company_info.realm_id", ondelete="CASCADE"), nullable=False, index=True)
+    franchise_number = Column(String(50), nullable=False, index=True)
+    
+    # QuickBooks Department Info
+    qbo_department_id = Column(String(50), nullable=True)
+    qbo_department_name = Column(String(255), nullable=True)
+    
+    # Mapping status
+    is_active = Column(String(10), default="true")
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_synced_at = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<CompanyLicenseMapping(realm_id='{self.realm_id}', franchise_number='{self.franchise_number}', department='{self.qbo_department_name}')>"
