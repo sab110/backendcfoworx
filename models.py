@@ -150,6 +150,10 @@ class CompanyInfo(Base):
     # Additional metadata (NameValue pairs, etc.)
     # metadata = Column(JSON, nullable=True)
     
+    # Onboarding Status
+    onboarding_completed = Column(String(10), default="false")  # "true" or "false"
+    onboarding_completed_at = Column(DateTime, nullable=True)
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

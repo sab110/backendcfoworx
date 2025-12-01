@@ -208,6 +208,11 @@ async def get_qbo_user(
 
         data = response.json()
 
+        # Check if company exists and onboarding is completed
+        from models import CompanyInfo
+        company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
+        onboarding_completed = company.onboarding_completed == "true" if company else False
+        
         return {
             "full_name": f"{data.get('givenName', '')} {data.get('familyName', '')}".strip(),
             "email": data.get("email"),
@@ -216,6 +221,8 @@ async def get_qbo_user(
                 "realm_id": realm_id,
                 "access_token": access_token,
             },
+            "onboarding_completed": onboarding_completed,
+            "company_name": company.company_name if company else None,
         }
 
     except Exception as e:
@@ -420,7 +427,8 @@ async def get_company_info(realm_id: str, db: Session = Depends(get_db)):
         "qbo_id": company_info.qbo_id,
         "sync_token": company_info.sync_token,
         "domain": company_info.domain,
-        "metadata": company_info.metadata,
+        "onboarding_completed": company_info.onboarding_completed if hasattr(company_info, 'onboarding_completed') else "false",
+        "onboarding_completed_at": company_info.onboarding_completed_at.isoformat() if hasattr(company_info, 'onboarding_completed_at') and company_info.onboarding_completed_at else None,
         "last_synced_at": company_info.last_synced_at.isoformat() if company_info.last_synced_at else None,
         "created_at": company_info.created_at.isoformat() if company_info.created_at else None,
         "updated_at": company_info.updated_at.isoformat() if company_info.updated_at else None

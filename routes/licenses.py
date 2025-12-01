@@ -157,6 +157,7 @@ async def save_selected_licenses(
     """
     Save the user's selected licenses (franchise numbers).
     This is used during onboarding when users choose which licenses to work with.
+    Also marks company onboarding as completed.
     """
     selected_franchise_numbers = payload.get("franchise_numbers", [])
     
@@ -180,6 +181,12 @@ async def save_selected_licenses(
         else:
             mapping.is_active = "false"
     
+    # Mark onboarding as completed for this company
+    if company.onboarding_completed != "true":
+        company.onboarding_completed = "true"
+        company.onboarding_completed_at = datetime.utcnow()
+        print(f"✅ Onboarding completed for company: {company.company_name} (realm_id: {realm_id})")
+    
     db.commit()
     
     return {
@@ -187,7 +194,8 @@ async def save_selected_licenses(
         "realm_id": realm_id,
         "total_licenses": len(all_mappings),
         "selected_count": updated_count,
-        "selected_franchise_numbers": selected_franchise_numbers
+        "selected_franchise_numbers": selected_franchise_numbers,
+        "onboarding_completed": True
     }
 
 
