@@ -11,7 +11,7 @@ from config import (
     ENVIRONMENT,
 )
 from db import get_db
-from models import QuickBooksToken, User
+from models import QuickBooksToken, User, CompanyInfo
 import requests
 
 router = APIRouter()
@@ -220,3 +220,208 @@ async def get_qbo_user(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------------------------------------------
+# Step 5: Fetch and Store Company Info from QuickBooks
+# ------------------------------------------------------
+@router.post("/fetch-company-info/{realm_id}")
+async def fetch_company_info(realm_id: str, db: Session = Depends(get_db)):
+    """
+    Fetches company information from QuickBooks and stores it in the database.
+    """
+    token_entry = db.query(QuickBooksToken).filter_by(realm_id=realm_id).first()
+    if not token_entry:
+        raise HTTPException(status_code=404, detail="No QuickBooks token found for this realm ID")
+
+    # --- Refresh if expired ---
+    if token_entry.is_expired():
+        print(f"🔄 Token expired for {realm_id}, refreshing...")
+        try:
+            auth_client = get_auth_client()
+            auth_client.refresh(refresh_token=token_entry.refresh_token)
+            token_entry.access_token = auth_client.access_token
+            token_entry.refresh_token = auth_client.refresh_token
+            token_entry.expires_at = datetime.utcnow() + timedelta(seconds=3600)
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=401, detail=f"Token refresh failed: {e}")
+
+    # --- Determine API base URL ---
+    base_url = (
+        "https://sandbox-quickbooks.api.intuit.com"
+        if ENVIRONMENT == "sandbox"
+        else "https://quickbooks.api.intuit.com"
+    )
+
+    # --- Query CompanyInfo from QuickBooks ---
+    company_info_url = f"{base_url}/v3/company/{realm_id}/query"
+    headers = {
+        "Authorization": f"Bearer {token_entry.access_token}",
+        "Accept": "application/json"
+    }
+    params = {
+        "query": "select * from CompanyInfo",
+        "minorversion": "75"
+    }
+
+    try:
+        print(f"🔍 Fetching company info for realm_id: {realm_id}")
+        response = requests.get(company_info_url, headers=headers, params=params)
+        
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"QuickBooks API error: {response.text}"
+            )
+
+        data = response.json()
+        print("✅ QuickBooks Company Info Response:", data)
+
+        # --- Extract CompanyInfo from response ---
+        company_data = data.get("QueryResponse", {}).get("CompanyInfo", [])
+        if not company_data:
+            raise HTTPException(status_code=404, detail="No company info found in QuickBooks response")
+
+        company = company_data[0]  # Get first (and typically only) result
+
+        # --- Parse and store company info ---
+        company_info = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
+
+        # Helper function to extract address
+        def parse_address(addr_data):
+            if not addr_data:
+                return None
+            return {
+                "id": addr_data.get("Id"),
+                "line1": addr_data.get("Line1"),
+                "line2": addr_data.get("Line2"),
+                "city": addr_data.get("City"),
+                "country": addr_data.get("Country"),
+                "country_sub_division_code": addr_data.get("CountrySubDivisionCode"),
+                "postal_code": addr_data.get("PostalCode")
+            }
+
+        # --- Create or update company info ---
+        if company_info:
+            # Update existing record
+            company_info.company_name = company.get("CompanyName")
+            company_info.legal_name = company.get("LegalName")
+            company_info.employer_id = company.get("EmployerId")
+            company_info.company_addr = parse_address(company.get("CompanyAddr"))
+            company_info.legal_addr = parse_address(company.get("LegalAddr"))
+            company_info.customer_communication_addr = parse_address(company.get("CustomerCommunicationAddr"))
+            company_info.email = company.get("Email", {}).get("Address")
+            company_info.customer_communication_email = company.get("CustomerCommunicationEmailAddr", {}).get("Address")
+            company_info.primary_phone = company.get("PrimaryPhone", {}).get("FreeFormNumber")
+            company_info.web_addr = company.get("WebAddr", {}).get("URI")
+            company_info.company_start_date = company.get("CompanyStartDate")
+            company_info.fiscal_year_start_month = company.get("FiscalYearStartMonth")
+            company_info.country = company.get("Country")
+            company_info.supported_languages = company.get("SupportedLanguages")
+            company_info.default_timezone = company.get("DefaultTimeZone")
+            company_info.qbo_id = company.get("Id")
+            company_info.sync_token = company.get("SyncToken")
+            company_info.domain = company.get("domain")
+            company_info.metadata = {
+                "name_value": company.get("NameValue", []),
+                "meta_data": company.get("MetaData", {}),
+                "sparse": company.get("sparse")
+            }
+            company_info.last_synced_at = datetime.utcnow()
+            company_info.updated_at = datetime.utcnow()
+        else:
+            # Create new record
+            company_info = CompanyInfo(
+                realm_id=realm_id,
+                company_name=company.get("CompanyName"),
+                legal_name=company.get("LegalName"),
+                employer_id=company.get("EmployerId"),
+                company_addr=parse_address(company.get("CompanyAddr")),
+                legal_addr=parse_address(company.get("LegalAddr")),
+                customer_communication_addr=parse_address(company.get("CustomerCommunicationAddr")),
+                email=company.get("Email", {}).get("Address"),
+                customer_communication_email=company.get("CustomerCommunicationEmailAddr", {}).get("Address"),
+                primary_phone=company.get("PrimaryPhone", {}).get("FreeFormNumber"),
+                web_addr=company.get("WebAddr", {}).get("URI"),
+                company_start_date=company.get("CompanyStartDate"),
+                fiscal_year_start_month=company.get("FiscalYearStartMonth"),
+                country=company.get("Country"),
+                supported_languages=company.get("SupportedLanguages"),
+                default_timezone=company.get("DefaultTimeZone"),
+                qbo_id=company.get("Id"),
+                sync_token=company.get("SyncToken"),
+                domain=company.get("domain"),
+                metadata={
+                    "name_value": company.get("NameValue", []),
+                    "meta_data": company.get("MetaData", {}),
+                    "sparse": company.get("sparse")
+                },
+                last_synced_at=datetime.utcnow()
+            )
+            db.add(company_info)
+
+        db.commit()
+        db.refresh(company_info) if company_info.id else None
+
+        return {
+            "message": "Company info fetched and stored successfully",
+            "company_info": {
+                "company_name": company_info.company_name,
+                "legal_name": company_info.legal_name,
+                "email": company_info.email,
+                "phone": company_info.primary_phone,
+                "realm_id": realm_id
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print("❌ Error fetching/storing company info:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------------------------------------------
+# Step 6: Get Stored Company Info from DB
+# ------------------------------------------------------
+@router.get("/company-info/{realm_id}")
+async def get_company_info(realm_id: str, db: Session = Depends(get_db)):
+    """
+    Retrieves stored company information from the database.
+    """
+    company_info = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
+    
+    if not company_info:
+        raise HTTPException(
+            status_code=404,
+            detail="Company info not found. Please fetch it first using /fetch-company-info endpoint"
+        )
+
+    return {
+        "realm_id": company_info.realm_id,
+        "company_name": company_info.company_name,
+        "legal_name": company_info.legal_name,
+        "employer_id": company_info.employer_id,
+        "company_addr": company_info.company_addr,
+        "legal_addr": company_info.legal_addr,
+        "customer_communication_addr": company_info.customer_communication_addr,
+        "email": company_info.email,
+        "customer_communication_email": company_info.customer_communication_email,
+        "primary_phone": company_info.primary_phone,
+        "web_addr": company_info.web_addr,
+        "company_start_date": company_info.company_start_date,
+        "fiscal_year_start_month": company_info.fiscal_year_start_month,
+        "country": company_info.country,
+        "supported_languages": company_info.supported_languages,
+        "default_timezone": company_info.default_timezone,
+        "qbo_id": company_info.qbo_id,
+        "sync_token": company_info.sync_token,
+        "domain": company_info.domain,
+        "metadata": company_info.metadata,
+        "last_synced_at": company_info.last_synced_at.isoformat() if company_info.last_synced_at else None,
+        "created_at": company_info.created_at.isoformat() if company_info.created_at else None,
+        "updated_at": company_info.updated_at.isoformat() if company_info.updated_at else None
+    }
