@@ -1,0 +1,17 @@
+intuit-oauth
+stripe
+uvicorn[standard]
+python-dotenv
+fastapi[standard]
+azure-storage-blob
+azure-identity
+psycopg2-binary
+sqlalchemy
+pydantic
+passlib[bcrypt]
+httpx
+asyncpg
+intuit-oauth
+gunicorn
+openpyxl
+python-dateutil
