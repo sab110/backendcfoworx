@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException, Depends
 from sqlalchemy.orm import Session
 from db import get_db
-from models import User, Subscription, Plan
+from models import CompanyInfo, Subscription, Plan, User, QuickBooksToken
 import stripe
 from datetime import datetime
 from config import STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, FRONTEND_URL
@@ -20,9 +20,10 @@ async def create_checkout_session(request: Request):
     data = await request.json()
     price_id = data.get("priceId")
     email = data.get("email")
+    realm_id = data.get("realm_id")  # Company identifier
 
-    if not price_id or not email:
-        raise HTTPException(status_code=400, detail="Missing required fields")
+    if not price_id or not email or not realm_id:
+        raise HTTPException(status_code=400, detail="Missing required fields: priceId, email, realm_id")
 
     try:
         session = stripe.checkout.Session.create(
@@ -32,6 +33,9 @@ async def create_checkout_session(request: Request):
             payment_method_types=["card"],
             customer_email=email,
             line_items=[{"price": price_id, "quantity": 1}],
+            metadata={
+                "realm_id": realm_id  # Store company identifier
+            }
         )
         return {"url": session.url}
     except Exception as e:
@@ -134,10 +138,50 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         customer_email = data.get("customer_email")
         stripe_subscription_id = data.get("subscription")  # This is the Stripe subscription ID
         stripe_customer_id = data.get("customer")
-        print(f"✅ Checkout completed for: {customer_email}")
+        realm_id = data.get("metadata", {}).get("realm_id")  # Get company realm_id from metadata
+        
+        print(f"✅ Checkout completed for: {customer_email} (Company realm_id: {realm_id})")
 
-        user = db.query(User).filter(User.email == customer_email).first()
-        if user and stripe_subscription_id:
+        # If no realm_id in metadata, try to find it from the user's QuickBooks token
+        if not realm_id:
+            print("⚠️  No realm_id in checkout session metadata. Attempting to find via email...")
+            
+            # Try to find user by email and get their realm_id from QuickBooks tokens
+            user = db.query(User).filter(User.email == customer_email).first()
+            if user:
+                # Find any QuickBooks token for this user
+                qb_token = db.query(QuickBooksToken).filter(QuickBooksToken.user_id == user.id).first()
+                if qb_token:
+                    realm_id = qb_token.realm_id
+                    print(f"✅ Found realm_id via user email: {realm_id}")
+            
+            # If still no realm_id, log warning and skip subscription creation
+            if not realm_id:
+                print(f"⚠️  Could not find realm_id for customer: {customer_email}")
+                print(f"   Subscription created in Stripe: {stripe_subscription_id}")
+                print(f"   Manual intervention required - assign subscription to company manually")
+                
+                # Don't fail the webhook, just log it
+                return {
+                    "status": "warning",
+                    "message": "Subscription created but not linked to company - missing realm_id",
+                    "stripe_subscription_id": stripe_subscription_id,
+                    "customer_email": customer_email
+                }
+
+        # Verify company exists
+        company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == realm_id).first()
+        if not company:
+            print(f"⚠️  Company not found for realm_id: {realm_id}")
+            print(f"   Creating placeholder - admin should verify")
+            # Don't fail, just log
+            return {
+                "status": "warning", 
+                "message": "Company not found in database",
+                "realm_id": realm_id
+            }
+
+        if stripe_subscription_id:
             # Fetch the full subscription object from Stripe
             sub = stripe.Subscription.retrieve(stripe_subscription_id)
             stripe_price_id = sub["items"]["data"][0]["price"]["id"]
@@ -150,9 +194,9 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             plan = db.query(Plan).filter(Plan.stripe_price_id == stripe_price_id).first()
             plan_id = plan.id if plan else None
 
-            # Create or update the subscription record
+            # Create or update the subscription record (company-level)
             db_subscription = (
-                db.query(Subscription).filter(Subscription.user_id == user.id).first()
+                db.query(Subscription).filter(Subscription.realm_id == realm_id).first()
             )
             if db_subscription:
                 db_subscription.plan_id = plan_id
@@ -163,7 +207,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 db_subscription.end_date = end_date
             else:
                 db_subscription = Subscription(
-                    user_id=user.id,
+                    realm_id=realm_id,
                     plan_id=plan_id,
                     stripe_subscription_id=stripe_subscription_id,
                     stripe_customer_id=stripe_customer_id,
@@ -174,7 +218,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 db.add(db_subscription)
 
             db.commit()
-            print(f"💾 Subscription saved for {customer_email} - Plan: {plan.name if plan else 'Unknown'} ({plan.billing_cycle if plan else 'N/A'})")
+            print(f"💾 Subscription saved for company {company.company_name} (realm_id: {realm_id}) - Plan: {plan.name if plan else 'Unknown'} ({plan.billing_cycle if plan else 'N/A'})")
 
 
     elif event_type == "customer.subscription.updated":
