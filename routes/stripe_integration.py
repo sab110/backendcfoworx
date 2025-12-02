@@ -188,15 +188,59 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             status = sub.get("status", "unknown")
 
             # Parse dates from Stripe subscription
+            print(f"📋 Stripe subscription dates:")
+            print(f"   start_date: {sub.get('start_date')}")
+            print(f"   created: {sub.get('created')}")
+            print(f"   current_period_start: {sub.get('current_period_start')}")
+            print(f"   current_period_end: {sub.get('current_period_end')}")
+            
             start_timestamp = sub.get("start_date") or sub.get("created")
             end_timestamp = sub.get("current_period_end")
             
-            if not start_timestamp or not end_timestamp:
-                print(f"⚠️  Warning: Missing date fields in Stripe subscription")
-                print(f"   start_date: {sub.get('start_date')}, current_period_end: {sub.get('current_period_end')}")
+            if not start_timestamp:
+                print(f"⚠️  Critical: Missing start_date in Stripe subscription")
+                return {"status": "error", "message": "Missing start_date"}
             
-            start_date = datetime.utcfromtimestamp(start_timestamp) if start_timestamp else datetime.utcnow()
-            end_date = datetime.utcfromtimestamp(end_timestamp) if end_timestamp else None
+            start_date = datetime.utcfromtimestamp(start_timestamp)
+            
+            # If current_period_end is missing, calculate from billing interval
+            if not end_timestamp:
+                print(f"⚠️  current_period_end missing, calculating from billing interval...")
+                
+                try:
+                    # Get billing interval from price
+                    price = sub["items"]["data"][0]["price"]
+                    if price.get("recurring"):
+                        interval = price["recurring"]["interval"]
+                        interval_count = price["recurring"].get("interval_count", 1)
+                        
+                        print(f"   Billing: {interval_count} {interval}(s)")
+                        
+                        # Calculate end date
+                        from dateutil.relativedelta import relativedelta
+                        from datetime import timedelta as td
+                        
+                        if interval == 'month':
+                            end_date = start_date + relativedelta(months=interval_count)
+                        elif interval == 'year':
+                            end_date = start_date + relativedelta(years=interval_count)
+                        elif interval == 'week':
+                            end_date = start_date + td(weeks=interval_count)
+                        elif interval == 'day':
+                            end_date = start_date + td(days=interval_count)
+                        else:
+                            print(f"❌ Unknown interval: {interval}")
+                            return {"status": "error", "message": f"Unknown billing interval: {interval}"}
+                        
+                        print(f"   Calculated end_date: {end_date}")
+                    else:
+                        print(f"❌ Not a recurring subscription")
+                        return {"status": "error", "message": "Not a recurring subscription"}
+                except Exception as calc_error:
+                    print(f"❌ Error calculating end_date: {str(calc_error)}")
+                    return {"status": "error", "message": f"Cannot calculate end_date: {str(calc_error)}"}
+            else:
+                end_date = datetime.utcfromtimestamp(end_timestamp)
             
             print(f"📅 Subscription dates: Start={start_date}, End={end_date}")
 

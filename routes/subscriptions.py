@@ -127,17 +127,67 @@ async def link_stripe_subscription(
         stripe_customer_id = stripe_sub.get("customer")
         
         # Parse dates correctly from Stripe
+        print(f"📋 Stripe subscription data:")
+        print(f"   ID: {stripe_sub.get('id')}")
+        print(f"   Status: {stripe_sub.get('status')}")
+        print(f"   start_date: {stripe_sub.get('start_date')}")
+        print(f"   created: {stripe_sub.get('created')}")
+        print(f"   current_period_end: {stripe_sub.get('current_period_end')}")
+        print(f"   current_period_start: {stripe_sub.get('current_period_start')}")
+        
         start_timestamp = stripe_sub.get("start_date") or stripe_sub.get("created")
         end_timestamp = stripe_sub.get("current_period_end")
         
-        if not start_timestamp or not end_timestamp:
-            print(f"⚠️  Warning: Missing date fields in Stripe subscription")
-            print(f"   Stripe subscription object: {stripe_sub}")
+        if not start_timestamp:
+            raise HTTPException(
+                status_code=500,
+                detail="Stripe subscription missing start_date and created timestamp"
+            )
         
-        start_date = datetime.utcfromtimestamp(start_timestamp) if start_timestamp else datetime.utcnow()
-        end_date = datetime.utcfromtimestamp(end_timestamp) if end_timestamp else None
+        start_date = datetime.utcfromtimestamp(start_timestamp)
         
-        print(f"📅 Linking subscription - Start: {start_date}, End: {end_date}")
+        # If current_period_end is missing, calculate it from billing interval
+        if not end_timestamp:
+            print(f"⚠️  current_period_end missing, calculating from billing interval...")
+            
+            # Get billing interval from price
+            price = stripe_sub["items"]["data"][0]["price"]
+            if price.get("recurring"):
+                interval = price["recurring"]["interval"]  # 'month', 'year', 'week', 'day'
+                interval_count = price["recurring"].get("interval_count", 1)
+                
+                print(f"   Billing: {interval_count} {interval}(s)")
+                
+                # Calculate end date
+                from dateutil.relativedelta import relativedelta
+                from datetime import timedelta
+                
+                if interval == 'month':
+                    end_date = start_date + relativedelta(months=interval_count)
+                elif interval == 'year':
+                    end_date = start_date + relativedelta(years=interval_count)
+                elif interval == 'week':
+                    end_date = start_date + timedelta(weeks=interval_count)
+                elif interval == 'day':
+                    end_date = start_date + timedelta(days=interval_count)
+                else:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Unknown billing interval: {interval}"
+                    )
+                
+                print(f"   Calculated end_date: {end_date}")
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Not a recurring subscription - cannot determine end date"
+                )
+        else:
+            end_date = datetime.utcfromtimestamp(end_timestamp)
+        
+        print(f"📅 Parsed dates:")
+        print(f"   Start: {start_date} (timestamp: {start_timestamp})")
+        print(f"   End: {end_date} (timestamp: {end_timestamp})")
         
         # Find plan by stripe_price_id
         plan = db.query(Plan).filter(Plan.stripe_price_id == stripe_price_id).first()
@@ -184,13 +234,14 @@ async def link_stripe_subscription(
             "end_date": end_date.isoformat() if end_date else None
         }
     
-    except stripe.error.StripeError as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Stripe error: {str(e)}"
-        )
     except Exception as e:
         db.rollback()
+        # Check if it's a Stripe error
+        if 'stripe' in str(type(e).__module__):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Stripe error: {str(e)}"
+            )
         raise HTTPException(
             status_code=500,
             detail=f"Error linking subscription: {str(e)}"
