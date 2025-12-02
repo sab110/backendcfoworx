@@ -21,9 +21,20 @@ async def create_checkout_session(request: Request):
     price_id = data.get("priceId")
     email = data.get("email")
     realm_id = data.get("realm_id")  # Company identifier
+    quantity = data.get("quantity", 1)  # Number of licenses (default to 1)
 
     if not price_id or not email or not realm_id:
         raise HTTPException(status_code=400, detail="Missing required fields: priceId, email, realm_id")
+    
+    # Validate quantity
+    if quantity < 1:
+        raise HTTPException(status_code=400, detail="Quantity must be at least 1")
+    
+    print(f"🛒 Creating checkout session:")
+    print(f"   Price ID: {price_id}")
+    print(f"   Email: {email}")
+    print(f"   Realm ID: {realm_id}")
+    print(f"   Quantity (licenses): {quantity}")
 
     try:
         session = stripe.checkout.Session.create(
@@ -32,13 +43,16 @@ async def create_checkout_session(request: Request):
             mode="subscription",
             payment_method_types=["card"],
             customer_email=email,
-            line_items=[{"price": price_id, "quantity": 1}],
+            line_items=[{"price": price_id, "quantity": quantity}],
             metadata={
-                "realm_id": realm_id  # Store company identifier
+                "realm_id": realm_id,  # Store company identifier
+                "quantity": str(quantity)  # Store quantity for reference
             }
         )
+        print(f"✅ Checkout session created: {session.id}")
         return {"url": session.url}
     except Exception as e:
+        print(f"❌ Error creating checkout session: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -244,6 +258,10 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             
             print(f"📅 Subscription dates: Start={start_date}, End={end_date}")
 
+            # Get quantity from subscription
+            quantity = sub["items"]["data"][0]["quantity"] if sub.get("items") and sub["items"].get("data") else 1
+            print(f"   Quantity: {quantity} licenses")
+            
             # Find the plan in our database by stripe_price_id
             plan = db.query(Plan).filter(Plan.stripe_price_id == stripe_price_id).first()
             plan_id = plan.id if plan else None
@@ -257,6 +275,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 db_subscription.stripe_subscription_id = stripe_subscription_id
                 db_subscription.stripe_customer_id = stripe_customer_id
                 db_subscription.status = status
+                db_subscription.quantity = quantity
                 db_subscription.start_date = start_date
                 db_subscription.end_date = end_date
             else:
@@ -266,13 +285,14 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     stripe_subscription_id=stripe_subscription_id,
                     stripe_customer_id=stripe_customer_id,
                     status=status,
+                    quantity=quantity,
                     start_date=start_date,
                     end_date=end_date,
                 )
                 db.add(db_subscription)
 
             db.commit()
-            print(f"💾 Subscription saved for company {company.company_name} (realm_id: {realm_id}) - Plan: {plan.name if plan else 'Unknown'} ({plan.billing_cycle if plan else 'N/A'})")
+            print(f"💾 Subscription saved for company {company.company_name} (realm_id: {realm_id}) - Plan: {plan.name if plan else 'Unknown'} ({plan.billing_cycle if plan else 'N/A'}) × {quantity} licenses")
 
 
     elif event_type == "customer.subscription.updated":
@@ -324,6 +344,10 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             end_date = datetime.utcfromtimestamp(end_timestamp)
         
         print(f"📅 Updated dates: Start={start_date}, End={end_date}")
+        
+        # Get quantity from subscription
+        quantity = sub["items"]["data"][0]["quantity"] if sub.get("items") and sub["items"].get("data") else 1
+        print(f"   Quantity: {quantity} licenses")
 
         # Find plan by stripe_price_id
         plan = db.query(Plan).filter(Plan.stripe_price_id == stripe_price_id).first()
@@ -340,9 +364,10 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 db_subscription.start_date = start_date
             if end_date:
                 db_subscription.end_date = end_date
+            db_subscription.quantity = quantity
             db_subscription.updated_at = datetime.utcnow()
             db.commit()
-            print(f"✅ Updated subscription: status={status}, plan={plan.name if plan else 'Unknown'}, next_billing={end_date}")
+            print(f"✅ Updated subscription: status={status}, plan={plan.name if plan else 'Unknown'}, quantity={quantity}, next_billing={end_date}")
         else:
             print(f"⚠️  Subscription not found in database: {stripe_sub_id}")
 

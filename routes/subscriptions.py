@@ -52,6 +52,7 @@ async def get_company_subscription(realm_id: str, db: Session = Depends(get_db))
         "company": company_details,
         "plan": plan_details,
         "status": subscription.status,
+        "quantity": subscription.quantity if hasattr(subscription, 'quantity') else 1,
         "start_date": subscription.start_date.isoformat() if subscription.start_date else None,
         "end_date": subscription.end_date.isoformat() if subscription.end_date else None,
         "stripe_subscription_id": subscription.stripe_subscription_id,
@@ -189,6 +190,10 @@ async def link_stripe_subscription(
         print(f"   Start: {start_date} (timestamp: {start_timestamp})")
         print(f"   End: {end_date} (timestamp: {end_timestamp})")
         
+        # Get quantity from subscription
+        quantity = stripe_sub["items"]["data"][0]["quantity"] if stripe_sub.get("items") and stripe_sub["items"].get("data") else 1
+        print(f"   Quantity: {quantity} licenses")
+        
         # Find plan by stripe_price_id
         plan = db.query(Plan).filter(Plan.stripe_price_id == stripe_price_id).first()
         plan_id = plan.id if plan else None
@@ -204,6 +209,7 @@ async def link_stripe_subscription(
             existing.stripe_customer_id = stripe_customer_id
             existing.plan_id = plan_id
             existing.status = status
+            existing.quantity = quantity
             existing.start_date = start_date
             existing.end_date = end_date
             message = "Subscription updated"
@@ -215,6 +221,7 @@ async def link_stripe_subscription(
                 stripe_subscription_id=stripe_subscription_id,
                 stripe_customer_id=stripe_customer_id,
                 status=status,
+                quantity=quantity,
                 start_date=start_date,
                 end_date=end_date
             )
@@ -230,6 +237,7 @@ async def link_stripe_subscription(
             "stripe_subscription_id": stripe_subscription_id,
             "plan": plan.name if plan else "Unknown",
             "status": status,
+            "quantity": quantity,
             "start_date": start_date.isoformat() if start_date else None,
             "end_date": end_date.isoformat() if end_date else None
         }

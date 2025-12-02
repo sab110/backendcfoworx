@@ -97,6 +97,7 @@ class Subscription(Base):
     stripe_subscription_id = Column(String(100), unique=True, nullable=True)
     stripe_customer_id = Column(String(100), nullable=True)
     status = Column(String(50), default="inactive")  # active, canceled, past_due, etc.
+    quantity = Column(Integer, default=1)  # Number of licenses (seats)
     start_date = Column(TIMESTAMP, nullable=True)
     end_date = Column(TIMESTAMP, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
