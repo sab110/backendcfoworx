@@ -187,8 +187,18 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             stripe_price_id = sub["items"]["data"][0]["price"]["id"]
             status = sub.get("status", "unknown")
 
-            start_date = datetime.utcfromtimestamp(sub.get("start_date", datetime.utcnow().timestamp()))
-            end_date = datetime.utcfromtimestamp(sub.get("current_period_end", datetime.utcnow().timestamp()))
+            # Parse dates from Stripe subscription
+            start_timestamp = sub.get("start_date") or sub.get("created")
+            end_timestamp = sub.get("current_period_end")
+            
+            if not start_timestamp or not end_timestamp:
+                print(f"⚠️  Warning: Missing date fields in Stripe subscription")
+                print(f"   start_date: {sub.get('start_date')}, current_period_end: {sub.get('current_period_end')}")
+            
+            start_date = datetime.utcfromtimestamp(start_timestamp) if start_timestamp else datetime.utcnow()
+            end_date = datetime.utcfromtimestamp(end_timestamp) if end_timestamp else None
+            
+            print(f"📅 Subscription dates: Start={start_date}, End={end_date}")
 
             # Find the plan in our database by stripe_price_id
             plan = db.query(Plan).filter(Plan.stripe_price_id == stripe_price_id).first()

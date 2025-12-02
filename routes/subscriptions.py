@@ -126,8 +126,18 @@ async def link_stripe_subscription(
         status = stripe_sub.get("status", "unknown")
         stripe_customer_id = stripe_sub.get("customer")
         
-        start_date = datetime.utcfromtimestamp(stripe_sub.get("start_date", datetime.utcnow().timestamp()))
-        end_date = datetime.utcfromtimestamp(stripe_sub.get("current_period_end", datetime.utcnow().timestamp()))
+        # Parse dates correctly from Stripe
+        start_timestamp = stripe_sub.get("start_date") or stripe_sub.get("created")
+        end_timestamp = stripe_sub.get("current_period_end")
+        
+        if not start_timestamp or not end_timestamp:
+            print(f"⚠️  Warning: Missing date fields in Stripe subscription")
+            print(f"   Stripe subscription object: {stripe_sub}")
+        
+        start_date = datetime.utcfromtimestamp(start_timestamp) if start_timestamp else datetime.utcnow()
+        end_date = datetime.utcfromtimestamp(end_timestamp) if end_timestamp else None
+        
+        print(f"📅 Linking subscription - Start: {start_date}, End: {end_date}")
         
         # Find plan by stripe_price_id
         plan = db.query(Plan).filter(Plan.stripe_price_id == stripe_price_id).first()
@@ -169,7 +179,9 @@ async def link_stripe_subscription(
             "company_name": company.company_name,
             "stripe_subscription_id": stripe_subscription_id,
             "plan": plan.name if plan else "Unknown",
-            "status": status
+            "status": status,
+            "start_date": start_date.isoformat() if start_date else None,
+            "end_date": end_date.isoformat() if end_date else None
         }
     
     except stripe.error.StripeError as e:
