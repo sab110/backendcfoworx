@@ -35,8 +35,13 @@ async def create_checkout_session(request: Request):
     print(f"   Email: {email}")
     print(f"   Realm ID: {realm_id}")
     print(f"   Quantity (licenses): {quantity}")
+    print(f"   Quantity type: {type(quantity)}")
 
     try:
+        # Ensure quantity is an integer
+        quantity = int(quantity) if quantity else 1
+        print(f"   Quantity after conversion: {quantity} (type: {type(quantity)})")
+        
         session = stripe.checkout.Session.create(
             success_url=f"{FRONTEND_URL}/success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{FRONTEND_URL}/cancel",
@@ -50,7 +55,16 @@ async def create_checkout_session(request: Request):
             }
         )
         print(f"✅ Checkout session created: {session.id}")
-        return {"url": session.url}
+        print(f"   Session URL: {session.url}")
+        print(f"   Line items: {session.line_items if hasattr(session, 'line_items') else 'Not available in response'}")
+        
+        # Log what we're sending to verify
+        print(f"📦 Stripe checkout configured with:")
+        print(f"   - Price: {price_id}")
+        print(f"   - Quantity: {quantity}")
+        print(f"   - Total: ${quantity} × price")
+        
+        return {"url": session.url, "session_id": session.id}
     except Exception as e:
         print(f"❌ Error creating checkout session: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
