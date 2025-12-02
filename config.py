@@ -23,3 +23,9 @@ QUICKBOOKS_CLIENT_ID = os.getenv("CLIENT_ID")
 QUICKBOOKS_CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 QUICKBOOKS_REDIRECT_URI = os.getenv("QUICKBOOKS_REDIRECT_URI")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "sandbox")
+
+# Admin credentials
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")  # Change in .env!
+ADMIN_JWT_SECRET = os.getenv("ADMIN_JWT_SECRET", "your-super-secret-key-change-in-production")
+ADMIN_JWT_EXPIRY_HOURS = int(os.getenv("ADMIN_JWT_EXPIRY_HOURS", "24"))

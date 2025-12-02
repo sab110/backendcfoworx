@@ -15,3 +15,4 @@ intuit-oauth
 gunicorn
 openpyxl
 python-dateutil
+PyJWT>=2.8.0

@@ -219,3 +219,99 @@ class CompanyLicenseMapping(Base):
 
     def __repr__(self):
         return f"<CompanyLicenseMapping(realm_id='{self.realm_id}', franchise_number='{self.franchise_number}', department='{self.qbo_department_name}')>"
+
+
+# ------------------------------------------------------
+# FAILED PAYMENT LOG MODEL
+# ------------------------------------------------------
+class FailedPaymentLog(Base):
+    __tablename__ = "failed_payment_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    realm_id = Column(String, ForeignKey("company_info.realm_id", ondelete="SET NULL"), nullable=True, index=True)
+    stripe_customer_id = Column(String(100), nullable=True, index=True)
+    stripe_subscription_id = Column(String(100), nullable=True)
+    stripe_invoice_id = Column(String(100), nullable=True)
+    
+    # Payment details
+    amount = Column(Integer, nullable=True)  # Amount in cents
+    currency = Column(String(10), default="usd")
+    failure_code = Column(String(100), nullable=True)
+    failure_message = Column(Text, nullable=True)
+    
+    # Customer info at time of failure
+    customer_email = Column(String(255), nullable=True)
+    company_name = Column(String(255), nullable=True)
+    
+    # Status tracking
+    status = Column(String(50), default="unresolved")  # unresolved, resolved, retrying
+    resolved_at = Column(DateTime, nullable=True)
+    resolution_notes = Column(Text, nullable=True)
+    
+    # Timestamps
+    failed_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<FailedPaymentLog(id={self.id}, customer_email='{self.customer_email}', status='{self.status}')>"
+
+
+# ------------------------------------------------------
+# SUBMISSION MODEL (Franchisee submissions)
+# ------------------------------------------------------
+class Submission(Base):
+    __tablename__ = "submissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    realm_id = Column(String, ForeignKey("company_info.realm_id", ondelete="CASCADE"), nullable=False, index=True)
+    franchise_number = Column(String(50), nullable=True, index=True)
+    
+    # Submission details
+    submission_type = Column(String(100), nullable=True)  # e.g., "royalty_report", "sales_report"
+    period_start = Column(DateTime, nullable=True)
+    period_end = Column(DateTime, nullable=True)
+    
+    # Financial data
+    gross_sales = Column(Integer, nullable=True)  # Amount in cents
+    royalty_amount = Column(Integer, nullable=True)
+    advertising_fee = Column(Integer, nullable=True)
+    
+    # Status
+    status = Column(String(50), default="submitted")  # submitted, approved, rejected, pending_review
+    
+    # File attachments (stored as JSON array of file URLs)
+    attachments = Column(JSON, nullable=True)
+    
+    # Notes and metadata
+    notes = Column(Text, nullable=True)
+    reviewed_by = Column(String(255), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    
+    # Timestamps
+    submitted_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<Submission(id={self.id}, realm_id='{self.realm_id}', status='{self.status}')>"
+
+
+# ------------------------------------------------------
+# ADMIN ACTIVITY LOG MODEL
+# ------------------------------------------------------
+class AdminActivityLog(Base):
+    __tablename__ = "admin_activity_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    admin_username = Column(String(100), nullable=False, index=True)
+    action = Column(String(100), nullable=False)  # e.g., "login", "view_clients", "export_data"
+    resource_type = Column(String(100), nullable=True)  # e.g., "subscription", "client", "payment"
+    resource_id = Column(String(100), nullable=True)
+    details = Column(JSON, nullable=True)  # Additional context
+    ip_address = Column(String(50), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<AdminActivityLog(id={self.id}, admin='{self.admin_username}', action='{self.action}')>"

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException, Depends
 from sqlalchemy.orm import Session
 from db import get_db
-from models import CompanyInfo, Subscription, Plan, User, QuickBooksToken
+from models import CompanyInfo, Subscription, Plan, User, QuickBooksToken, FailedPaymentLog
 import stripe
 from datetime import datetime
 from config import STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, FRONTEND_URL
@@ -400,6 +400,72 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
     elif event_type == "invoice.payment_failed":
         print(f"⚠️ Payment failed for subscription: {data.get('subscription')}")
+        
+        # Log the failed payment
+        try:
+            invoice_id = data.get("id")
+            subscription_id = data.get("subscription")
+            customer_id = data.get("customer")
+            amount = data.get("amount_due", 0)
+            currency = data.get("currency", "usd")
+            
+            # Get failure details
+            charge = data.get("charge")
+            failure_code = None
+            failure_message = "Payment failed"
+            
+            if charge:
+                try:
+                    charge_obj = stripe.Charge.retrieve(charge)
+                    failure_code = charge_obj.get("failure_code")
+                    failure_message = charge_obj.get("failure_message") or "Payment failed"
+                except:
+                    pass
+            
+            # Get customer email
+            customer_email = data.get("customer_email")
+            if not customer_email and customer_id:
+                try:
+                    customer = stripe.Customer.retrieve(customer_id)
+                    customer_email = customer.email
+                except:
+                    pass
+            
+            # Find realm_id and company name
+            realm_id = None
+            company_name = None
+            if subscription_id:
+                sub = db.query(Subscription).filter(
+                    Subscription.stripe_subscription_id == subscription_id
+                ).first()
+                if sub:
+                    realm_id = sub.realm_id
+                    company = db.query(CompanyInfo).filter(
+                        CompanyInfo.realm_id == realm_id
+                    ).first()
+                    if company:
+                        company_name = company.company_name
+            
+            # Create failed payment log
+            failed_log = FailedPaymentLog(
+                realm_id=realm_id,
+                stripe_customer_id=customer_id,
+                stripe_subscription_id=subscription_id,
+                stripe_invoice_id=invoice_id,
+                amount=amount,
+                currency=currency,
+                failure_code=failure_code,
+                failure_message=failure_message,
+                customer_email=customer_email,
+                company_name=company_name,
+                failed_at=datetime.utcnow()
+            )
+            db.add(failed_log)
+            db.commit()
+            print(f"📝 Logged failed payment: {invoice_id}")
+            
+        except Exception as log_error:
+            print(f"❌ Error logging failed payment: {str(log_error)}")
 
     elif event_type == "invoice.payment_succeeded":
         print(f"💰 Payment succeeded for invoice: {data['id']}")
