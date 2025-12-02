@@ -281,6 +281,49 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         stripe_price_id = data["items"]["data"][0]["price"]["id"]
 
         print(f"🔁 Subscription updated: {stripe_sub_id} → {status}")
+        print(f"   New price: {stripe_price_id}")
+
+        # Fetch full subscription object to get updated dates
+        sub = stripe.Subscription.retrieve(stripe_sub_id)
+        
+        # Parse dates (same logic as checkout)
+        start_timestamp = sub.get("start_date") or sub.get("created")
+        end_timestamp = sub.get("current_period_end")
+        
+        start_date = datetime.utcfromtimestamp(start_timestamp) if start_timestamp else None
+        
+        # Calculate end_date if missing
+        if not end_timestamp:
+            print(f"⚠️  current_period_end missing, calculating from billing interval...")
+            try:
+                price = sub["items"]["data"][0]["price"]
+                if price.get("recurring"):
+                    interval = price["recurring"]["interval"]
+                    interval_count = price["recurring"].get("interval_count", 1)
+                    
+                    from dateutil.relativedelta import relativedelta
+                    from datetime import timedelta as td
+                    
+                    if interval == 'month':
+                        end_date = start_date + relativedelta(months=interval_count)
+                    elif interval == 'year':
+                        end_date = start_date + relativedelta(years=interval_count)
+                    elif interval == 'week':
+                        end_date = start_date + td(weeks=interval_count)
+                    elif interval == 'day':
+                        end_date = start_date + td(days=interval_count)
+                    else:
+                        end_date = None
+                        print(f"❌ Unknown interval: {interval}")
+                else:
+                    end_date = None
+            except Exception as calc_error:
+                print(f"❌ Error calculating end_date: {str(calc_error)}")
+                end_date = None
+        else:
+            end_date = datetime.utcfromtimestamp(end_timestamp)
+        
+        print(f"📅 Updated dates: Start={start_date}, End={end_date}")
 
         # Find plan by stripe_price_id
         plan = db.query(Plan).filter(Plan.stripe_price_id == stripe_price_id).first()
@@ -293,9 +336,15 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db_subscription.status = status
             if plan:
                 db_subscription.plan_id = plan.id
+            if start_date:
+                db_subscription.start_date = start_date
+            if end_date:
+                db_subscription.end_date = end_date
             db_subscription.updated_at = datetime.utcnow()
             db.commit()
-            print(f"✅ Updated subscription status to {status}")
+            print(f"✅ Updated subscription: status={status}, plan={plan.name if plan else 'Unknown'}, next_billing={end_date}")
+        else:
+            print(f"⚠️  Subscription not found in database: {stripe_sub_id}")
 
     elif event_type == "customer.subscription.deleted":
         stripe_sub_id = data["id"]
