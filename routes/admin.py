@@ -175,6 +175,11 @@ async def get_all_clients(
             Subscription.realm_id == company.realm_id
         ).first()
         
+        # Get plan info if subscription exists
+        plan = None
+        if subscription and subscription.plan_id:
+            plan = db.query(Plan).filter(Plan.id == subscription.plan_id).first()
+        
         # Get license count
         license_count = db.query(CompanyLicenseMapping).filter(
             CompanyLicenseMapping.realm_id == company.realm_id,
@@ -189,6 +194,17 @@ async def get_all_clients(
         if qb_token:
             user = db.query(User).filter(User.id == qb_token.user_id).first()
         
+        # Build subscription data
+        subscription_data = None
+        if subscription:
+            subscription_data = {
+                "status": subscription.status,
+                "plan_id": subscription.plan_id,
+                "plan_name": plan.name if plan else None,
+                "quantity": subscription.quantity,
+                "end_date": subscription.end_date.isoformat() if subscription.end_date else None
+            }
+        
         clients.append({
             "realm_id": company.realm_id,
             "company_name": company.company_name,
@@ -200,12 +216,7 @@ async def get_all_clients(
             "onboarding_completed": company.onboarding_completed,
             "created_at": company.created_at.isoformat() if company.created_at else None,
             "license_count": license_count,
-            "subscription": {
-                "status": subscription.status if subscription else "no_subscription",
-                "plan_id": subscription.plan_id if subscription else None,
-                "quantity": subscription.quantity if subscription else 0,
-                "end_date": subscription.end_date.isoformat() if subscription and subscription.end_date else None
-            } if subscription else None,
+            "subscription": subscription_data,
             "user": {
                 "id": user.id,
                 "email": user.email,
