@@ -310,6 +310,9 @@ async def fetch_company_info(realm_id: str, db: Session = Depends(get_db)):
                 "postal_code": addr_data.get("PostalCode")
             }
 
+        # --- Track if this is a new company signup ---
+        is_new_company = company_info is None
+
         # --- Create or update company info ---
         if company_info:
             # Update existing record
@@ -372,6 +375,54 @@ async def fetch_company_info(realm_id: str, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(company_info) if company_info.id else None
 
+        # --- Send welcome email for new company signups ---
+        welcome_email_sent = False
+        if is_new_company:
+            try:
+                from services.email_service import email_service
+                from models import EmailPreference
+
+                # Get the company email
+                company_email = company_info.email or company_info.customer_communication_email
+                company_name = company_info.company_name or "Your Company"
+
+                if company_email:
+                    # Send welcome email
+                    result = email_service.send_welcome_email(
+                        to=company_email,
+                        company_name=company_name,
+                        db=db,
+                        realm_id=realm_id,
+                    )
+                    welcome_email_sent = result.get("success", False)
+                    if welcome_email_sent:
+                        print(f"✅ Welcome email sent to {company_email}")
+
+                        # Auto-create email preference for the company email
+                        existing_pref = db.query(EmailPreference).filter_by(
+                            realm_id=realm_id, email=company_email
+                        ).first()
+                        if not existing_pref:
+                            email_pref = EmailPreference(
+                                realm_id=realm_id,
+                                email=company_email,
+                                label="Primary",
+                                is_primary="true",
+                                receive_reports="true",
+                                receive_billing="true",
+                                receive_notifications="true",
+                            )
+                            db.add(email_pref)
+                            db.commit()
+                            print(f"✅ Auto-created email preference for {company_email}")
+                    else:
+                        print(f"⚠️ Failed to send welcome email: {result.get('error')}")
+                else:
+                    print("⚠️ No email address available for welcome email")
+            except Exception as email_error:
+                # Don't fail the whole operation if email fails
+                print(f"⚠️ Error sending welcome email: {str(email_error)}")
+
         return {
             "message": "Company info fetched and stored successfully",
             "company_info": {
@@ -380,7 +431,9 @@ async def fetch_company_info(realm_id: str, db: Session = Depends(get_db)):
                 "email": company_info.email,
                 "phone": company_info.primary_phone,
                 "realm_id": realm_id
-            }
+            },
+            "is_new_company": is_new_company,
+            "welcome_email_sent": welcome_email_sent,
         }
 
     except HTTPException:

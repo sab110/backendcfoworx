@@ -29,3 +29,7 @@ ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")  # Change in .env!
 ADMIN_JWT_SECRET = os.getenv("ADMIN_JWT_SECRET", "your-super-secret-key-change-in-production")
 ADMIN_JWT_EXPIRY_HOURS = int(os.getenv("ADMIN_JWT_EXPIRY_HOURS", "24"))
+
+# Resend Email settings
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+EMAIL_FROM = os.getenv("EMAIL_FROM", "CFO Worx <noreply@royaltiesagent.com>")

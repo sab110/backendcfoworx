@@ -7,6 +7,7 @@ from routes.quickbooks_auth import router as quickbooks_router
 from routes.subscriptions import router as subscriptions_router
 from routes.licenses import router as licenses_router
 from routes.admin import router as admin_router
+from routes.email_preferences import router as email_preferences_router
 from db import engine, Base
 
 
@@ -38,6 +39,7 @@ app.include_router(quickbooks_router, prefix="/api/quickbooks", tags=["QuickBook
 app.include_router(subscriptions_router, prefix="/api/subscriptions", tags=["Subscriptions"])
 app.include_router(licenses_router, prefix="/api/licenses", tags=["Licenses"])
 app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
+app.include_router(email_preferences_router, prefix="/api/email-preferences", tags=["Email Preferences"])
 
 @app.get("/")
 def root():

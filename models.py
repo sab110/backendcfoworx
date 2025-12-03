@@ -315,3 +315,45 @@ class AdminActivityLog(Base):
 
     def __repr__(self):
         return f"<AdminActivityLog(id={self.id}, admin='{self.admin_username}', action='{self.action}')>"
+
+
+# ------------------------------------------------------
+# EMAIL PREFERENCE MODEL
+# ------------------------------------------------------
+class EmailPreference(Base):
+    __tablename__ = "email_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    realm_id = Column(String, ForeignKey("company_info.realm_id", ondelete="CASCADE"), nullable=False, index=True)
+    email = Column(String(255), nullable=False)
+    label = Column(String(100), nullable=True)  # e.g., "Primary", "Billing", "Reports"
+    is_primary = Column(String(10), default="false")  # "true" or "false"
+    receive_reports = Column(String(10), default="true")  # Receive report emails
+    receive_billing = Column(String(10), default="true")  # Receive billing emails
+    receive_notifications = Column(String(10), default="true")  # Receive notification emails
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<EmailPreference(id={self.id}, realm_id='{self.realm_id}', email='{self.email}')>"
+
+
+# ------------------------------------------------------
+# EMAIL LOG MODEL (for tracking sent emails)
+# ------------------------------------------------------
+class EmailLog(Base):
+    __tablename__ = "email_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    realm_id = Column(String, ForeignKey("company_info.realm_id", ondelete="SET NULL"), nullable=True, index=True)
+    recipient_email = Column(String(255), nullable=False)
+    subject = Column(String(500), nullable=False)
+    email_type = Column(String(50), nullable=False)  # e.g., "welcome", "report", "billing", "notification"
+    resend_id = Column(String(100), nullable=True)  # ID from Resend API
+    status = Column(String(50), default="sent")  # sent, failed, bounced, delivered
+    error_message = Column(Text, nullable=True)
+    sent_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<EmailLog(id={self.id}, recipient='{self.recipient_email}', type='{self.email_type}')>"
