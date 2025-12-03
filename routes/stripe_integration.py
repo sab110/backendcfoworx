@@ -1,15 +1,127 @@
 from fastapi import APIRouter, Request, HTTPException, Depends
 from sqlalchemy.orm import Session
 from db import get_db
-from models import CompanyInfo, Subscription, Plan, User, QuickBooksToken, FailedPaymentLog
+from models import CompanyInfo, Subscription, Plan, User, QuickBooksToken, FailedPaymentLog, EmailPreference
 import stripe
 from datetime import datetime
 from config import STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, FRONTEND_URL
 
 
-
 router = APIRouter()
 stripe.api_key = STRIPE_SECRET_KEY
+
+
+def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_data: dict = None):
+    """
+    Helper to send subscription-related emails.
+    email_type: 'subscription_created', 'subscription_renewed', 'subscription_canceled', 'payment_failed'
+    """
+    try:
+        from services.email_service import email_service
+        
+        # Get company info
+        company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == realm_id).first()
+        if not company:
+            print(f"⚠️ Cannot send email: Company not found for realm_id {realm_id}")
+            return False
+        
+        company_name = company.company_name or "Your Company"
+        
+        # Get all billing email recipients
+        email_prefs = db.query(EmailPreference).filter(
+            EmailPreference.realm_id == realm_id,
+            EmailPreference.receive_billing == "true"
+        ).all()
+        
+        recipients = [pref.email for pref in email_prefs]
+        
+        # Fallback to company email if no preferences set
+        if not recipients:
+            if company.email:
+                recipients = [company.email]
+            elif company.customer_communication_email:
+                recipients = [company.customer_communication_email]
+        
+        if not recipients:
+            print(f"⚠️ No email recipients found for realm_id {realm_id}")
+            return False
+        
+        print(f"📧 Sending {email_type} email to: {recipients}")
+        
+        # Send appropriate email based on type
+        if email_type == "subscription_created":
+            result = email_service.send_billing_notification(
+                to=recipients,
+                company_name=company_name,
+                notification_type="subscription_renewed",  # Using "renewed" template for new subscriptions too
+                details=extra_data or {},
+                db=db,
+                realm_id=realm_id,
+            )
+        elif email_type == "subscription_canceled":
+            # Custom cancellation email
+            subject = "⚠️ Your CFO Worx Subscription Has Been Canceled"
+            html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head><meta charset="utf-8"></head>
+            <body style="margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background-color: #f4f7fa;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                    <div style="background: #dc2626; border-radius: 16px 16px 0 0; padding: 40px 30px; text-align: center;">
+                        <h1 style="color: #fff; margin: 0; font-size: 28px;">⚠️ Subscription Canceled</h1>
+                    </div>
+                    <div style="background: #fff; padding: 40px 30px; border-radius: 0 0 16px 16px;">
+                        <p style="color: #334155; font-size: 16px;">Hi <strong>{company_name}</strong>,</p>
+                        <p style="color: #334155; font-size: 16px;">Your CFO Worx subscription has been canceled. You will lose access to premium features at the end of your current billing period.</p>
+                        <p style="color: #334155; font-size: 16px;">If this was a mistake or you'd like to resubscribe, you can do so from your dashboard.</p>
+                        <div style="text-align: center; margin: 30px 0;">
+                            <a href="{FRONTEND_URL}/subscribe" style="display: inline-block; background: #2563eb; color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600;">Resubscribe Now</a>
+                        </div>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            result = email_service.send_email(
+                to=recipients,
+                subject=subject,
+                html=html,
+                db=db,
+                realm_id=realm_id,
+                email_type="billing",
+            )
+        elif email_type == "payment_failed":
+            result = email_service.send_billing_notification(
+                to=recipients,
+                company_name=company_name,
+                notification_type="payment_failed",
+                details=extra_data or {},
+                db=db,
+                realm_id=realm_id,
+            )
+        elif email_type == "payment_succeeded":
+            result = email_service.send_billing_notification(
+                to=recipients,
+                company_name=company_name,
+                notification_type="subscription_renewed",
+                details=extra_data or {},
+                db=db,
+                realm_id=realm_id,
+            )
+        else:
+            print(f"⚠️ Unknown email type: {email_type}")
+            return False
+        
+        if result.get("success"):
+            print(f"✅ {email_type} email sent successfully")
+            return True
+        else:
+            print(f"❌ Failed to send {email_type} email: {result.get('error')}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error sending {email_type} email: {str(e)}")
+        return False
 
 
 # --------------------------------------------------------------------
@@ -307,6 +419,17 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
             db.commit()
             print(f"💾 Subscription saved for company {company.company_name} (realm_id: {realm_id}) - Plan: {plan.name if plan else 'Unknown'} ({plan.billing_cycle if plan else 'N/A'}) × {quantity} licenses")
+            
+            # Send subscription confirmation email
+            send_subscription_email(
+                db=db,
+                realm_id=realm_id,
+                email_type="subscription_created",
+                extra_data={
+                    "plan": plan.name if plan else "Unknown",
+                    "quantity": quantity,
+                }
+            )
 
 
     elif event_type == "customer.subscription.updated":
@@ -394,9 +517,17 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             Subscription.stripe_subscription_id == stripe_sub_id
         ).first()
         if db_subscription:
+            realm_id = db_subscription.realm_id
             db_subscription.status = "canceled"
             db.commit()
             print(f"✅ Marked subscription as canceled")
+            
+            # Send cancellation email
+            send_subscription_email(
+                db=db,
+                realm_id=realm_id,
+                email_type="subscription_canceled",
+            )
 
     elif event_type == "invoice.payment_failed":
         print(f"⚠️ Payment failed for subscription: {data.get('subscription')}")
@@ -464,10 +595,39 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db.commit()
             print(f"📝 Logged failed payment: {invoice_id}")
             
+            # Send payment failed email
+            if realm_id:
+                send_subscription_email(
+                    db=db,
+                    realm_id=realm_id,
+                    email_type="payment_failed",
+                    extra_data={
+                        "failure_message": failure_message,
+                        "amount": amount,
+                    }
+                )
+            
         except Exception as log_error:
             print(f"❌ Error logging failed payment: {str(log_error)}")
 
     elif event_type == "invoice.payment_succeeded":
         print(f"💰 Payment succeeded for invoice: {data['id']}")
+        
+        # Send payment success email for renewal (not for first payment which is handled by checkout.session.completed)
+        subscription_id = data.get("subscription")
+        if subscription_id:
+            # Check if this is a renewal (subscription already exists in our DB)
+            db_subscription = db.query(Subscription).filter(
+                Subscription.stripe_subscription_id == subscription_id
+            ).first()
+            
+            # Only send renewal email if subscription exists and this isn't the first payment
+            billing_reason = data.get("billing_reason")
+            if db_subscription and billing_reason in ["subscription_cycle", "subscription_update"]:
+                send_subscription_email(
+                    db=db,
+                    realm_id=db_subscription.realm_id,
+                    email_type="payment_succeeded",
+                )
 
     return {"status": "success"}

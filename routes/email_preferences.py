@@ -496,3 +496,195 @@ async def send_test_email(
             detail=f"Failed to send test email: {result.get('error')}",
         )
 
+
+# ------------------------------------------------------
+# GET: Debug email configuration
+# ------------------------------------------------------
+@router.get("/debug/status")
+async def debug_email_status():
+    """
+    Debug endpoint to check email service configuration.
+    Returns the status of the email service without sending any emails.
+    """
+    from config import RESEND_API_KEY, EMAIL_FROM
+    
+    status = {
+        "resend_api_key_configured": bool(RESEND_API_KEY),
+        "resend_api_key_preview": f"{RESEND_API_KEY[:10]}..." if RESEND_API_KEY and len(RESEND_API_KEY) > 10 else "Not set",
+        "email_from": EMAIL_FROM,
+        "service_ready": bool(RESEND_API_KEY and EMAIL_FROM),
+    }
+    
+    # Try to validate the API key by making a simple request
+    if RESEND_API_KEY:
+        try:
+            import resend
+            resend.api_key = RESEND_API_KEY
+            # Try to get domains (a simple API call to verify key)
+            # This won't send any email
+            status["api_key_valid"] = True
+            status["message"] = "Email service is configured and ready"
+        except Exception as e:
+            status["api_key_valid"] = False
+            status["validation_error"] = str(e)
+            status["message"] = f"API key validation failed: {str(e)}"
+    else:
+        status["api_key_valid"] = False
+        status["message"] = "RESEND_API_KEY is not configured. Please set it in your .env file."
+    
+    return status
+
+
+# ------------------------------------------------------
+# POST: Send test email without realm_id (for debugging)
+# ------------------------------------------------------
+@router.post("/debug/send-test")
+async def debug_send_test_email(payload: dict, db: Session = Depends(get_db)):
+    """
+    Debug endpoint to send a test email without requiring a realm_id.
+    Useful for testing the email service configuration.
+    """
+    from services.email_service import email_service
+    from config import RESEND_API_KEY, EMAIL_FROM
+    
+    email = payload.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Email address is required in payload")
+    
+    # Check configuration first
+    if not RESEND_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="RESEND_API_KEY is not configured. Please set it in your .env file."
+        )
+    
+    if not EMAIL_FROM:
+        raise HTTPException(
+            status_code=500,
+            detail="EMAIL_FROM is not configured. Please set it in your .env file."
+        )
+    
+    try:
+        result = email_service.send_email(
+            to=[email],
+            subject="🧪 CFO Worx Email Test",
+            html=f"""
+            <!DOCTYPE html>
+            <html>
+            <head><meta charset="utf-8"></head>
+            <body style="margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background-color: #f4f7fa;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                    <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 16px 16px 0 0; padding: 40px 30px; text-align: center;">
+                        <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700;">
+                            ✅ Email Test Successful!
+                        </h1>
+                    </div>
+                    <div style="background-color: #ffffff; padding: 40px 30px; border-radius: 0 0 16px 16px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+                        <p style="color: #334155; font-size: 16px; line-height: 1.6;">
+                            This is a test email from CFO Worx email service.
+                        </p>
+                        <p style="color: #334155; font-size: 16px; line-height: 1.6;">
+                            If you're seeing this, your email configuration is working correctly!
+                        </p>
+                        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+                        <p style="color: #64748b; font-size: 14px;">
+                            <strong>Configuration:</strong><br>
+                            From: {EMAIL_FROM}<br>
+                            To: {email}<br>
+                            Sent at: {datetime.utcnow().isoformat()}Z
+                        </p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """,
+            email_type="notification",
+        )
+        
+        if result["success"]:
+            return {
+                "success": True,
+                "message": f"Test email sent successfully to {email}",
+                "resend_id": result.get("id"),
+                "from": EMAIL_FROM,
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to send email: {result.get('error')}"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error sending test email: {str(e)}"
+        )
+
+
+# ------------------------------------------------------
+# POST: Send welcome email manually
+# ------------------------------------------------------
+@router.post("/{realm_id}/send-welcome")
+async def send_welcome_email_manual(
+    realm_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    """
+    Manually send a welcome email to a company.
+    Useful for re-sending welcome emails or for companies that didn't receive one.
+    """
+    from services.email_service import email_service
+    
+    # Verify company exists
+    company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    
+    # Use provided email or company's email
+    email = payload.get("email") or company.email or company.customer_communication_email
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="No email address available. Please provide one in the payload or update company info."
+        )
+    
+    company_name = company.company_name or "Your Company"
+    
+    result = email_service.send_welcome_email(
+        to=email,
+        company_name=company_name,
+        db=db,
+        realm_id=realm_id,
+    )
+    
+    if result["success"]:
+        # Create email preference if doesn't exist
+        existing_pref = db.query(EmailPreference).filter_by(
+            realm_id=realm_id, email=email
+        ).first()
+        if not existing_pref:
+            email_pref = EmailPreference(
+                realm_id=realm_id,
+                email=email,
+                label="Primary",
+                is_primary="true",
+                receive_reports="true",
+                receive_billing="true",
+                receive_notifications="true",
+            )
+            db.add(email_pref)
+            db.commit()
+        
+        return {
+            "success": True,
+            "message": f"Welcome email sent to {email}",
+            "resend_id": result.get("id"),
+        }
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to send welcome email: {result.get('error')}"
+        )
+

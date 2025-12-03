@@ -182,12 +182,93 @@ async def save_selected_licenses(
             mapping.is_active = "false"
     
     # Mark onboarding as completed for this company
+    onboarding_just_completed = False
     if company.onboarding_completed != "true":
         company.onboarding_completed = "true"
         company.onboarding_completed_at = datetime.utcnow()
+        onboarding_just_completed = True
         print(f"✅ Onboarding completed for company: {company.company_name} (realm_id: {realm_id})")
     
     db.commit()
+    
+    # Send onboarding completion email
+    if onboarding_just_completed:
+        try:
+            from services.email_service import email_service
+            from models import EmailPreference
+            
+            # Get email recipients
+            email_prefs = db.query(EmailPreference).filter(
+                EmailPreference.realm_id == realm_id,
+                EmailPreference.receive_notifications == "true"
+            ).all()
+            
+            recipients = [pref.email for pref in email_prefs]
+            if not recipients:
+                if company.email:
+                    recipients = [company.email]
+                elif company.customer_communication_email:
+                    recipients = [company.customer_communication_email]
+            
+            if recipients:
+                from config import FRONTEND_URL
+                company_name = company.company_name or "Your Company"
+                
+                html = f"""
+                <!DOCTYPE html>
+                <html>
+                <head><meta charset="utf-8"></head>
+                <body style="margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background-color: #f4f7fa;">
+                    <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                        <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 16px 16px 0 0; padding: 40px 30px; text-align: center;">
+                            <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700;">
+                                🎉 Onboarding Complete!
+                            </h1>
+                            <p style="color: #a7f3d0; margin: 10px 0 0 0; font-size: 16px;">
+                                You're all set up and ready to go
+                            </p>
+                        </div>
+                        <div style="background-color: #ffffff; padding: 40px 30px; border-radius: 0 0 16px 16px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+                            <p style="color: #334155; font-size: 16px; line-height: 1.6;">
+                                Hi <strong>{company_name}</strong>,
+                            </p>
+                            <p style="color: #334155; font-size: 16px; line-height: 1.6;">
+                                Congratulations! Your onboarding is now complete. You've successfully:
+                            </p>
+                            <ul style="color: #334155; font-size: 15px; line-height: 1.8;">
+                                <li>Connected your QuickBooks account</li>
+                                <li>Selected {updated_count} franchise location(s)</li>
+                                <li>Configured your department mappings</li>
+                            </ul>
+                            <p style="color: #334155; font-size: 16px; line-height: 1.6;">
+                                You can now start generating royalty reports from your dashboard.
+                            </p>
+                            <div style="text-align: center; margin: 30px 0;">
+                                <a href="{FRONTEND_URL}/dashboard" 
+                                   style="display: inline-block; background: linear-gradient(135deg, #1a365d 0%, #2d5a87 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                                    Go to Dashboard →
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """
+                
+                result = email_service.send_email(
+                    to=recipients,
+                    subject=f"🎉 Onboarding Complete - {company_name}",
+                    html=html,
+                    db=db,
+                    realm_id=realm_id,
+                    email_type="notification",
+                )
+                if result.get("success"):
+                    print(f"✅ Onboarding completion email sent to {recipients}")
+                else:
+                    print(f"⚠️ Failed to send onboarding email: {result.get('error')}")
+        except Exception as e:
+            print(f"⚠️ Error sending onboarding completion email: {str(e)}")
     
     return {
         "message": "License selection saved successfully",
