@@ -15,6 +15,8 @@ def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_d
     """
     Helper to send subscription-related emails.
     email_type: 'subscription_created', 'subscription_renewed', 'subscription_canceled', 'payment_failed'
+    
+    Sends to USER email (the person who logged in), not company email.
     """
     try:
         from services.email_service import email_service
@@ -27,7 +29,16 @@ def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_d
         
         company_name = company.company_name or "Your Company"
         
-        # Get all billing email recipients
+        # First, try to get the USER email (the person who signed in)
+        qb_token = db.query(QuickBooksToken).filter(QuickBooksToken.realm_id == realm_id).first()
+        user_email = None
+        if qb_token:
+            user = db.query(User).filter(User.id == qb_token.user_id).first()
+            if user and user.email:
+                user_email = user.email
+                print(f"📧 Found user email: {user_email}")
+        
+        # Get email preference recipients (for those who want billing emails)
         email_prefs = db.query(EmailPreference).filter(
             EmailPreference.realm_id == realm_id,
             EmailPreference.receive_billing == "true"
@@ -35,7 +46,11 @@ def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_d
         
         recipients = [pref.email for pref in email_prefs]
         
-        # Fallback to company email if no preferences set
+        # Add user email if not already in recipients
+        if user_email and user_email not in recipients:
+            recipients.insert(0, user_email)  # Put user email first
+        
+        # Fallback to company email if no recipients found
         if not recipients:
             if company.email:
                 recipients = [company.email]

@@ -382,30 +382,39 @@ async def fetch_company_info(realm_id: str, db: Session = Depends(get_db)):
                 from services.email_service import email_service
                 from models import EmailPreference
 
-                # Get the company email
-                company_email = company_info.email or company_info.customer_communication_email
+                # Get the USER email (the person who signed in), not company email
+                qb_token = db.query(QuickBooksToken).filter_by(realm_id=realm_id).first()
+                user_email = None
+                if qb_token:
+                    user = db.query(User).filter_by(id=qb_token.user_id).first()
+                    if user and user.email:
+                        user_email = user.email
+                        print(f"📧 Found user email for welcome: {user_email}")
+                
+                # Fallback to company email if no user email
+                email_to_use = user_email or company_info.email or company_info.customer_communication_email
                 company_name = company_info.company_name or "Your Company"
 
-                if company_email:
-                    # Send welcome email
+                if email_to_use:
+                    # Send welcome email to USER
                     result = email_service.send_welcome_email(
-                        to=company_email,
+                        to=email_to_use,
                         company_name=company_name,
                         db=db,
                         realm_id=realm_id,
                     )
                     welcome_email_sent = result.get("success", False)
                     if welcome_email_sent:
-                        print(f"✅ Welcome email sent to {company_email}")
+                        print(f"✅ Welcome email sent to {email_to_use}")
 
-                        # Auto-create email preference for the company email
+                        # Auto-create email preference for the user email
                         existing_pref = db.query(EmailPreference).filter_by(
-                            realm_id=realm_id, email=company_email
+                            realm_id=realm_id, email=email_to_use
                         ).first()
                         if not existing_pref:
                             email_pref = EmailPreference(
                                 realm_id=realm_id,
-                                email=company_email,
+                                email=email_to_use,
                                 label="Primary",
                                 is_primary="true",
                                 receive_reports="true",
@@ -414,7 +423,7 @@ async def fetch_company_info(realm_id: str, db: Session = Depends(get_db)):
                             )
                             db.add(email_pref)
                             db.commit()
-                            print(f"✅ Auto-created email preference for {company_email}")
+                            print(f"✅ Auto-created email preference for {email_to_use}")
                     else:
                         print(f"⚠️ Failed to send welcome email: {result.get('error')}")
                 else:

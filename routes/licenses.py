@@ -406,13 +406,29 @@ async def save_selected_licenses(
             from services.email_service import email_service
             from models import EmailPreference
             
-            # Get email recipients
+            # First, get the USER email (the person who signed in)
+            qb_token = db.query(QuickBooksToken).filter_by(realm_id=realm_id).first()
+            user_email = None
+            if qb_token:
+                from models import User
+                user = db.query(User).filter_by(id=qb_token.user_id).first()
+                if user and user.email:
+                    user_email = user.email
+                    print(f"📧 Found user email for onboarding: {user_email}")
+            
+            # Get email preference recipients
             email_prefs = db.query(EmailPreference).filter(
                 EmailPreference.realm_id == realm_id,
                 EmailPreference.receive_notifications == "true"
             ).all()
             
             recipients = [pref.email for pref in email_prefs]
+            
+            # Add user email if not already in recipients
+            if user_email and user_email not in recipients:
+                recipients.insert(0, user_email)  # Put user email first
+            
+            # Fallback to company email if no recipients
             if not recipients:
                 if company.email:
                     recipients = [company.email]
