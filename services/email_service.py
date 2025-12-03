@@ -424,9 +424,9 @@ class EmailService:
                     </p>
                     
                     <div style="text-align: center; margin: 30px 0;">
-                        <a href="{FRONTEND_URL}/settings/billing" 
+                        <a href="{FRONTEND_URL}/dashboard" 
                            style="display: inline-block; background: {template['color']}; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
-                            Manage Billing →
+                            Go to Dashboard →
                         </a>
                     </div>
                     
