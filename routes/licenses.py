@@ -846,7 +846,12 @@ async def update_company_license_mapping(
     
     # Update the mapping
     if "is_active" in payload:
-        mapping.is_active = "true" if payload["is_active"] else "false"
+        # Handle both boolean and string values
+        is_active_value = payload["is_active"]
+        if isinstance(is_active_value, str):
+            mapping.is_active = "true" if is_active_value.lower() == "true" else "false"
+        else:
+            mapping.is_active = "true" if is_active_value else "false"
     
     mapping.updated_at = datetime.utcnow()
     db.commit()

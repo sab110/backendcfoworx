@@ -85,13 +85,21 @@ def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_d
                     <div style="background: #dc2626; border-radius: 16px 16px 0 0; padding: 40px 30px; text-align: center;">
                         <h1 style="color: #fff; margin: 0; font-size: 28px;">⚠️ Subscription Canceled</h1>
                     </div>
-                    <div style="background: #fff; padding: 40px 30px; border-radius: 0 0 16px 16px;">
+                    <div style="background: #fff; padding: 40px 30px; border-radius: 0 0 16px 16px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
                         <p style="color: #334155; font-size: 16px;">Hi <strong>{company_name}</strong>,</p>
-                        <p style="color: #334155; font-size: 16px;">Your CFO Worx subscription has been canceled. You will lose access to premium features at the end of your current billing period.</p>
-                        <p style="color: #334155; font-size: 16px;">If this was a mistake or you'd like to resubscribe, you can do so from your dashboard.</p>
-                        <div style="text-align: center; margin: 30px 0;">
-                            <a href="{FRONTEND_URL}/subscribe" style="display: inline-block; background: #2563eb; color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600;">Resubscribe Now</a>
+                        <p style="color: #334155; font-size: 16px;">Your CFO Worx subscription has been <strong style="color: #dc2626;">canceled</strong>.</p>
+                        
+                        <div style="background: #fef2f2; border-radius: 8px; padding: 20px; margin: 20px 0; border: 1px solid #fecaca;">
+                            <p style="margin: 0; color: #334155; font-size: 14px;"><strong>Status:</strong> <span style="color: #dc2626; font-weight: 700;">CANCELED</span></p>
                         </div>
+                        
+                        <p style="color: #334155; font-size: 16px;">You will lose access to premium features at the end of your current billing period. If this was a mistake or you'd like to resubscribe, you can do so anytime.</p>
+                        
+                        <div style="text-align: center; margin: 30px 0;">
+                            <a href="{FRONTEND_URL}/subscribe" style="display: inline-block; background: #10b981; color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600;">Resubscribe Now</a>
+                        </div>
+                        
+                        <p style="color: #64748b; font-size: 14px; text-align: center;">Questions? Contact our support team for assistance.</p>
                     </div>
                 </div>
             </body>
