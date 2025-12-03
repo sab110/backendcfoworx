@@ -75,7 +75,7 @@ def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_d
             )
         elif email_type == "subscription_canceled":
             # Custom cancellation email
-            subject = "⚠️ Your CFO Worx Subscription Has Been Canceled"
+            subject = "Your CFO Worx Subscription Has Been Canceled"
             html = f"""
             <!DOCTYPE html>
             <html>
@@ -83,17 +83,18 @@ def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_d
             <body style="margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background-color: #f4f7fa;">
                 <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
                     <div style="background: #dc2626; border-radius: 16px 16px 0 0; padding: 40px 30px; text-align: center;">
-                        <h1 style="color: #fff; margin: 0; font-size: 28px;">⚠️ Subscription Canceled</h1>
+                        <h1 style="color: #fff; margin: 0; font-size: 28px;">Subscription Canceled</h1>
                     </div>
                     <div style="background: #fff; padding: 40px 30px; border-radius: 0 0 16px 16px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
                         <p style="color: #334155; font-size: 16px;">Hi <strong>{company_name}</strong>,</p>
                         <p style="color: #334155; font-size: 16px;">Your CFO Worx subscription has been <strong style="color: #dc2626;">canceled</strong>.</p>
                         
                         <div style="background: #fef2f2; border-radius: 8px; padding: 20px; margin: 20px 0; border: 1px solid #fecaca;">
-                            <p style="margin: 0; color: #334155; font-size: 14px;"><strong>Status:</strong> <span style="color: #dc2626; font-weight: 700;">CANCELED</span></p>
+                            <p style="margin: 0 0 8px 0; color: #334155; font-size: 14px;"><strong>Status:</strong> <span style="color: #dc2626; font-weight: 700;">CANCELED</span></p>
+                            <p style="margin: 0; color: #64748b; font-size: 13px;">Your subscription will not renew. You can continue to use premium features until the end of your current billing period.</p>
                         </div>
                         
-                        <p style="color: #334155; font-size: 16px;">You will lose access to premium features at the end of your current billing period. If this was a mistake or you'd like to resubscribe, you can do so anytime.</p>
+                        <p style="color: #334155; font-size: 16px;">If this was a mistake or you'd like to resubscribe, you can do so anytime from your dashboard.</p>
                         
                         <div style="text-align: center; margin: 30px 0;">
                             <a href="{FRONTEND_URL}/subscribe" style="display: inline-block; background: #10b981; color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600;">Resubscribe Now</a>
@@ -497,9 +498,15 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         stripe_sub_id = data["id"]
         status = data["status"]
         stripe_price_id = data["items"]["data"][0]["price"]["id"]
+        
+        # Check if user initiated cancellation (cancel_at_period_end)
+        cancel_at_period_end = data.get("cancel_at_period_end", False)
+        canceled_at = data.get("canceled_at")  # Timestamp when cancellation was initiated
 
         print(f"🔁 Subscription updated: {stripe_sub_id} → {status}")
         print(f"   New price: {stripe_price_id}")
+        print(f"   cancel_at_period_end: {cancel_at_period_end}")
+        print(f"   canceled_at: {canceled_at}")
 
         # Fetch full subscription object to get updated dates
         sub = stripe.Subscription.retrieve(stripe_sub_id)
@@ -558,7 +565,15 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             old_status = db_subscription.status
             old_quantity = db_subscription.quantity
             
-            db_subscription.status = status
+            # IMPORTANT: If cancel_at_period_end is true, user has initiated cancellation
+            # Mark as "canceled" immediately so the UI reflects this
+            if cancel_at_period_end or canceled_at:
+                effective_status = "canceled"
+                print(f"⚠️ User initiated cancellation - marking as canceled immediately")
+            else:
+                effective_status = status
+            
+            db_subscription.status = effective_status
             if plan:
                 db_subscription.plan_id = plan.id
             if start_date:
@@ -568,10 +583,19 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db_subscription.quantity = quantity
             db_subscription.updated_at = datetime.utcnow()
             db.commit()
-            print(f"✅ Updated subscription: status={status}, plan={plan.name if plan else 'Unknown'}, quantity={quantity}, next_billing={end_date}")
+            print(f"✅ Updated subscription: status={effective_status}, plan={plan.name if plan else 'Unknown'}, quantity={quantity}, next_billing={end_date}")
             
-            # Send subscription updated email (but NOT if status is canceled - that's handled by subscription.deleted)
-            if status not in ["canceled", "cancelled"]:
+            # Send appropriate email based on what changed
+            if cancel_at_period_end and old_status != "canceled":
+                # User just initiated cancellation - send cancellation email immediately
+                print(f"📧 Sending cancellation email (user initiated cancellation)")
+                send_subscription_email(
+                    db=db,
+                    realm_id=db_subscription.realm_id,
+                    email_type="subscription_canceled",
+                )
+            elif effective_status not in ["canceled", "cancelled"]:
+                # Normal update (plan change, quantity change, etc.)
                 send_subscription_email(
                     db=db,
                     realm_id=db_subscription.realm_id,
@@ -579,7 +603,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     extra_data={
                         "plan": plan.name if plan else "Unknown",
                         "quantity": quantity,
-                        "status": status,
+                        "status": effective_status,
                         "old_status": old_status,
                         "old_quantity": old_quantity,
                     }
@@ -589,24 +613,31 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
     elif event_type == "customer.subscription.deleted":
         stripe_sub_id = data["id"]
-        print(f"❌ Subscription canceled: {stripe_sub_id}")
+        print(f"❌ Subscription deleted (period ended): {stripe_sub_id}")
         
-        # Mark as canceled
+        # Mark as canceled (if not already)
         db_subscription = db.query(Subscription).filter(
             Subscription.stripe_subscription_id == stripe_sub_id
         ).first()
         if db_subscription:
             realm_id = db_subscription.realm_id
+            was_already_canceled = db_subscription.status == "canceled"
+            
             db_subscription.status = "canceled"
             db.commit()
             print(f"✅ Marked subscription as canceled")
             
-            # Send cancellation email
-            send_subscription_email(
-                db=db,
-                realm_id=realm_id,
-                email_type="subscription_canceled",
-            )
+            # Only send cancellation email if we haven't already sent one
+            # (we send it immediately when cancel_at_period_end is set)
+            if not was_already_canceled:
+                print(f"📧 Sending cancellation email (subscription deleted)")
+                send_subscription_email(
+                    db=db,
+                    realm_id=realm_id,
+                    email_type="subscription_canceled",
+                )
+            else:
+                print(f"ℹ️ Skipping cancellation email - already sent when user initiated cancellation")
 
     elif event_type == "invoice.payment_failed":
         print(f"⚠️ Payment failed for subscription: {data.get('subscription')}")
