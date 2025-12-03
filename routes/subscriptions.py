@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from db import get_db
-from models import Subscription, Plan, CompanyInfo
+from models import Subscription, Plan, CompanyInfo, QuickBooksToken, User, EmailPreference, EmailLog, CompanyLicenseMapping
 
 router = APIRouter()
 
@@ -253,5 +253,122 @@ async def link_stripe_subscription(
         raise HTTPException(
             status_code=500,
             detail=f"Error linking subscription: {str(e)}"
+        )
+
+
+@router.delete("/account/{realm_id}")
+async def delete_account(realm_id: str, db: Session = Depends(get_db)):
+    """
+    Delete a company account and all associated data.
+    This will:
+    - Cancel the Stripe subscription (if active)
+    - Delete email preferences
+    - Delete email logs
+    - Delete license mappings
+    - Delete subscription
+    - Delete company info
+    - Delete QuickBooks token
+    - Delete user
+    """
+    import stripe
+    from config import STRIPE_SECRET_KEY
+    
+    stripe.api_key = STRIPE_SECRET_KEY
+    
+    # 1. Check if company exists
+    company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == realm_id).first()
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    
+    # Get the QuickBooks token to find the user
+    token = db.query(QuickBooksToken).filter(QuickBooksToken.realm_id == realm_id).first()
+    user_id = token.user_id if token else None
+    
+    deleted_items = {
+        "stripe_subscription_cancelled": False,
+        "email_preferences": 0,
+        "email_logs": 0,
+        "license_mappings": 0,
+        "subscription": False,
+        "company": False,
+        "token": False,
+        "user": False,
+    }
+    
+    try:
+        # 2. Cancel Stripe subscription if exists
+        subscription = db.query(Subscription).filter(Subscription.realm_id == realm_id).first()
+        if subscription and subscription.stripe_subscription_id:
+            try:
+                stripe.Subscription.cancel(subscription.stripe_subscription_id)
+                deleted_items["stripe_subscription_cancelled"] = True
+                print(f"✅ Cancelled Stripe subscription: {subscription.stripe_subscription_id}")
+            except stripe.error.InvalidRequestError as e:
+                # Subscription might already be cancelled
+                print(f"⚠️ Stripe subscription already cancelled or invalid: {e}")
+                deleted_items["stripe_subscription_cancelled"] = True
+            except Exception as e:
+                print(f"⚠️ Error cancelling Stripe subscription: {e}")
+        
+        # 3. Delete email preferences
+        email_prefs = db.query(EmailPreference).filter(EmailPreference.realm_id == realm_id).all()
+        deleted_items["email_preferences"] = len(email_prefs)
+        for pref in email_prefs:
+            db.delete(pref)
+        
+        # 4. Delete email logs
+        email_logs = db.query(EmailLog).filter(EmailLog.realm_id == realm_id).all()
+        deleted_items["email_logs"] = len(email_logs)
+        for log in email_logs:
+            db.delete(log)
+        
+        # 5. Delete license mappings
+        mappings = db.query(CompanyLicenseMapping).filter(CompanyLicenseMapping.realm_id == realm_id).all()
+        deleted_items["license_mappings"] = len(mappings)
+        for mapping in mappings:
+            db.delete(mapping)
+        
+        # 6. Delete subscription
+        if subscription:
+            db.delete(subscription)
+            deleted_items["subscription"] = True
+        
+        # 7. Delete company info
+        db.delete(company)
+        deleted_items["company"] = True
+        
+        # 8. Delete QuickBooks token
+        if token:
+            db.delete(token)
+            deleted_items["token"] = True
+        
+        # 9. Delete user (if no other tokens exist for this user)
+        if user_id:
+            other_tokens = db.query(QuickBooksToken).filter(
+                QuickBooksToken.user_id == user_id,
+                QuickBooksToken.realm_id != realm_id
+            ).first()
+            
+            if not other_tokens:
+                user = db.query(User).filter(User.id == user_id).first()
+                if user:
+                    db.delete(user)
+                    deleted_items["user"] = True
+        
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Account deleted successfully",
+            "realm_id": realm_id,
+            "deleted_items": deleted_items,
+        }
+    
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error deleting account: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting account: {str(e)}"
         )
 
