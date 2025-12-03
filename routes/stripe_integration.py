@@ -562,19 +562,20 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db.commit()
             print(f"✅ Updated subscription: status={status}, plan={plan.name if plan else 'Unknown'}, quantity={quantity}, next_billing={end_date}")
             
-            # Send subscription updated email
-            send_subscription_email(
-                db=db,
-                realm_id=db_subscription.realm_id,
-                email_type="subscription_updated",
-                extra_data={
-                    "plan": plan.name if plan else "Unknown",
-                    "quantity": quantity,
-                    "status": status,
-                    "old_status": old_status,
-                    "old_quantity": old_quantity,
-                }
-            )
+            # Send subscription updated email (but NOT if status is canceled - that's handled by subscription.deleted)
+            if status not in ["canceled", "cancelled"]:
+                send_subscription_email(
+                    db=db,
+                    realm_id=db_subscription.realm_id,
+                    email_type="subscription_updated",
+                    extra_data={
+                        "plan": plan.name if plan else "Unknown",
+                        "quantity": quantity,
+                        "status": status,
+                        "old_status": old_status,
+                        "old_quantity": old_quantity,
+                    }
+                )
         else:
             print(f"⚠️  Subscription not found in database: {stripe_sub_id}")
 
