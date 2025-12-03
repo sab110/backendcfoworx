@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import Optional
 from db import get_db
 from models import License, CompanyLicenseMapping, CompanyInfo, QuickBooksToken
 from datetime import datetime, timedelta
@@ -8,6 +10,213 @@ import re
 from config import ENVIRONMENT
 
 router = APIRouter()
+
+
+# ------------------------------------------------------
+# Pydantic Models for License CRUD
+# ------------------------------------------------------
+class LicenseCreate(BaseModel):
+    franchise_number: str
+    name: Optional[str] = None
+    owner: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+
+
+class LicenseUpdate(BaseModel):
+    name: Optional[str] = None
+    owner: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+
+
+# ------------------------------------------------------
+# CREATE: Add a new license
+# ------------------------------------------------------
+@router.post("/create")
+async def create_license(license_data: LicenseCreate, db: Session = Depends(get_db)):
+    """
+    Create a new license/franchise.
+    """
+    # Check if franchise number already exists
+    existing = db.query(License).filter_by(franchise_number=license_data.franchise_number).first()
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"License with franchise number {license_data.franchise_number} already exists"
+        )
+    
+    # Create new license
+    new_license = License(
+        franchise_number=license_data.franchise_number,
+        name=license_data.name,
+        owner=license_data.owner,
+        address=license_data.address,
+        city=license_data.city,
+        state=license_data.state.upper() if license_data.state else None,
+        zip_code=license_data.zip_code,
+    )
+    
+    db.add(new_license)
+    db.commit()
+    db.refresh(new_license)
+    
+    return {
+        "message": "License created successfully",
+        "license": {
+            "id": new_license.id,
+            "franchise_number": new_license.franchise_number,
+            "name": new_license.name,
+            "owner": new_license.owner,
+            "address": new_license.address,
+            "city": new_license.city,
+            "state": new_license.state,
+            "zip_code": new_license.zip_code,
+            "created_at": new_license.created_at.isoformat() if new_license.created_at else None
+        }
+    }
+
+
+# ------------------------------------------------------
+# UPDATE: Update an existing license
+# ------------------------------------------------------
+@router.put("/update/{franchise_number}")
+async def update_license(
+    franchise_number: str,
+    license_data: LicenseUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Update an existing license by franchise number.
+    """
+    license_entry = db.query(License).filter_by(franchise_number=franchise_number).first()
+    if not license_entry:
+        raise HTTPException(
+            status_code=404,
+            detail=f"License not found for franchise number: {franchise_number}"
+        )
+    
+    # Update fields if provided
+    if license_data.name is not None:
+        license_entry.name = license_data.name
+    if license_data.owner is not None:
+        license_entry.owner = license_data.owner
+    if license_data.address is not None:
+        license_entry.address = license_data.address
+    if license_data.city is not None:
+        license_entry.city = license_data.city
+    if license_data.state is not None:
+        license_entry.state = license_data.state.upper()
+    if license_data.zip_code is not None:
+        license_entry.zip_code = license_data.zip_code
+    
+    license_entry.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(license_entry)
+    
+    return {
+        "message": "License updated successfully",
+        "license": {
+            "id": license_entry.id,
+            "franchise_number": license_entry.franchise_number,
+            "name": license_entry.name,
+            "owner": license_entry.owner,
+            "address": license_entry.address,
+            "city": license_entry.city,
+            "state": license_entry.state,
+            "zip_code": license_entry.zip_code,
+            "updated_at": license_entry.updated_at.isoformat() if license_entry.updated_at else None
+        }
+    }
+
+
+# ------------------------------------------------------
+# DELETE: Remove a license
+# ------------------------------------------------------
+@router.delete("/delete/{franchise_number}")
+async def delete_license(franchise_number: str, db: Session = Depends(get_db)):
+    """
+    Delete a license by franchise number.
+    Also removes any company mappings associated with this license.
+    """
+    license_entry = db.query(License).filter_by(franchise_number=franchise_number).first()
+    if not license_entry:
+        raise HTTPException(
+            status_code=404,
+            detail=f"License not found for franchise number: {franchise_number}"
+        )
+    
+    # Delete any mappings associated with this license
+    mappings_deleted = db.query(CompanyLicenseMapping).filter_by(
+        franchise_number=franchise_number
+    ).delete()
+    
+    # Delete the license
+    db.delete(license_entry)
+    db.commit()
+    
+    return {
+        "message": f"License {franchise_number} deleted successfully",
+        "franchise_number": franchise_number,
+        "mappings_removed": mappings_deleted
+    }
+
+
+# ------------------------------------------------------
+# BULK CREATE: Add multiple licenses at once
+# ------------------------------------------------------
+@router.post("/bulk-create")
+async def bulk_create_licenses(
+    payload: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Create multiple licenses at once.
+    Expects: { "licenses": [{ franchise_number, name, owner, ... }, ...] }
+    """
+    licenses_data = payload.get("licenses", [])
+    if not licenses_data:
+        raise HTTPException(status_code=400, detail="No licenses provided")
+    
+    created = []
+    skipped = []
+    
+    for lic_data in licenses_data:
+        franchise_number = lic_data.get("franchise_number")
+        if not franchise_number:
+            skipped.append({"data": lic_data, "reason": "Missing franchise_number"})
+            continue
+        
+        # Check if already exists
+        existing = db.query(License).filter_by(franchise_number=franchise_number).first()
+        if existing:
+            skipped.append({"franchise_number": franchise_number, "reason": "Already exists"})
+            continue
+        
+        # Create new license
+        new_license = License(
+            franchise_number=franchise_number,
+            name=lic_data.get("name"),
+            owner=lic_data.get("owner"),
+            address=lic_data.get("address"),
+            city=lic_data.get("city"),
+            state=lic_data.get("state", "").upper() if lic_data.get("state") else None,
+            zip_code=lic_data.get("zip_code"),
+        )
+        db.add(new_license)
+        created.append(franchise_number)
+    
+    db.commit()
+    
+    return {
+        "message": f"Bulk create completed. Created: {len(created)}, Skipped: {len(skipped)}",
+        "created": created,
+        "skipped": skipped
+    }
 
 
 @router.get("/all")
@@ -585,5 +794,198 @@ async def get_company_licenses(realm_id: str, db: Session = Depends(get_db)):
         "company_email": company.email,
         "count": len(licenses_data),
         "licenses": licenses_data
+    }
+
+
+# ------------------------------------------------------
+# UPDATE: Update license mapping (activate/deactivate)
+# ------------------------------------------------------
+@router.put("/company/{realm_id}/mapping/{franchise_number}")
+async def update_company_license_mapping(
+    realm_id: str,
+    franchise_number: str,
+    payload: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Update a license mapping for a company (e.g., activate/deactivate).
+    Payload: { "is_active": true/false }
+    """
+    # Verify company exists
+    company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    
+    # Find the mapping
+    mapping = db.query(CompanyLicenseMapping).filter_by(
+        realm_id=realm_id,
+        franchise_number=franchise_number
+    ).first()
+    
+    if not mapping:
+        raise HTTPException(
+            status_code=404,
+            detail=f"License mapping not found for franchise {franchise_number}"
+        )
+    
+    # Update the mapping
+    if "is_active" in payload:
+        mapping.is_active = "true" if payload["is_active"] else "false"
+    
+    mapping.updated_at = datetime.utcnow()
+    db.commit()
+    
+    return {
+        "message": f"License mapping for {franchise_number} updated",
+        "franchise_number": franchise_number,
+        "is_active": mapping.is_active
+    }
+
+
+# ------------------------------------------------------
+# POST: Add a new license to company
+# ------------------------------------------------------
+@router.post("/company/{realm_id}/add-license")
+async def add_license_to_company(
+    realm_id: str,
+    payload: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Add a new license mapping to a company.
+    Payload: { "franchise_number": "12345", "department_name": "Optional" }
+    """
+    # Verify company exists
+    company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    
+    franchise_number = payload.get("franchise_number")
+    if not franchise_number:
+        raise HTTPException(status_code=400, detail="franchise_number is required")
+    
+    # Check if license exists in database
+    license_entry = db.query(License).filter_by(franchise_number=franchise_number).first()
+    if not license_entry:
+        raise HTTPException(
+            status_code=404,
+            detail=f"License {franchise_number} not found in database. Create it first using /api/licenses/create"
+        )
+    
+    # Check if mapping already exists
+    existing = db.query(CompanyLicenseMapping).filter_by(
+        realm_id=realm_id,
+        franchise_number=franchise_number
+    ).first()
+    
+    if existing:
+        # Reactivate if it was deactivated
+        existing.is_active = "true"
+        existing.updated_at = datetime.utcnow()
+        db.commit()
+        return {
+            "message": f"License {franchise_number} reactivated for company",
+            "action": "reactivated"
+        }
+    
+    # Create new mapping
+    mapping = CompanyLicenseMapping(
+        realm_id=realm_id,
+        franchise_number=franchise_number,
+        qbo_department_name=payload.get("department_name"),
+        is_active="true",
+        last_synced_at=datetime.utcnow()
+    )
+    db.add(mapping)
+    db.commit()
+    
+    return {
+        "message": f"License {franchise_number} added to company",
+        "action": "created",
+        "license": {
+            "franchise_number": license_entry.franchise_number,
+            "name": license_entry.name,
+            "city": license_entry.city,
+            "state": license_entry.state
+        }
+    }
+
+
+# ------------------------------------------------------
+# DELETE: Remove a license from company
+# ------------------------------------------------------
+@router.delete("/company/{realm_id}/remove-license/{franchise_number}")
+async def remove_license_from_company(
+    realm_id: str,
+    franchise_number: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Remove a license mapping from a company.
+    This deactivates the mapping rather than deleting it.
+    """
+    # Verify company exists
+    company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    
+    # Find the mapping
+    mapping = db.query(CompanyLicenseMapping).filter_by(
+        realm_id=realm_id,
+        franchise_number=franchise_number
+    ).first()
+    
+    if not mapping:
+        raise HTTPException(
+            status_code=404,
+            detail=f"License mapping not found for franchise {franchise_number}"
+        )
+    
+    # Deactivate the mapping
+    mapping.is_active = "false"
+    mapping.updated_at = datetime.utcnow()
+    db.commit()
+    
+    return {
+        "message": f"License {franchise_number} removed from company",
+        "franchise_number": franchise_number
+    }
+
+
+# ------------------------------------------------------
+# DELETE: Permanently remove a license mapping
+# ------------------------------------------------------
+@router.delete("/company/{realm_id}/mapping/{franchise_number}/permanent")
+async def permanently_delete_license_mapping(
+    realm_id: str,
+    franchise_number: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Permanently delete a license mapping from a company.
+    Use with caution - this cannot be undone.
+    """
+    # Verify company exists
+    company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    
+    # Find and delete the mapping
+    deleted = db.query(CompanyLicenseMapping).filter_by(
+        realm_id=realm_id,
+        franchise_number=franchise_number
+    ).delete()
+    
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail=f"License mapping not found for franchise {franchise_number}"
+        )
+    
+    db.commit()
+    
+    return {
+        "message": f"License mapping for {franchise_number} permanently deleted",
+        "franchise_number": franchise_number
     }
 
