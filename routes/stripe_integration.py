@@ -4,7 +4,9 @@ from db import get_db
 from models import CompanyInfo, Subscription, Plan, User, QuickBooksToken, FailedPaymentLog, EmailPreference
 import stripe
 from datetime import datetime
+import time
 from config import STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, FRONTEND_URL
+from services.logging_service import LoggingService, log_info, log_error, log_webhook
 
 
 router = APIRouter()
@@ -320,20 +322,34 @@ async def create_customer_portal(request: Request):
 
 @router.post("/webhooks")
 async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
+    start_time = time.time()
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except ValueError:
+        log_webhook(db, "stripe", "unknown", status="failed", error_message="Invalid payload")
         raise HTTPException(status_code=400, detail="Invalid payload")
     except stripe.error.SignatureVerificationError:
+        log_webhook(db, "stripe", "unknown", status="failed", error_message="Invalid signature")
         raise HTTPException(status_code=400, detail="Invalid signature")
 
     event_type = event["type"]
+    event_id = event.get("id")
     data = event["data"]["object"]
 
     print(f"📦 Received event: {event_type}")
+    
+    # Log webhook received
+    webhook_log = log_webhook(
+        db, 
+        source="stripe",
+        event_type=event_type,
+        event_id=event_id,
+        status="received",
+        payload={"event_type": event_type, "object_id": data.get("id")}
+    )
 
     # --- CHECKOUT COMPLETED ---
     if event_type == "checkout.session.completed":
@@ -739,5 +755,20 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     realm_id=db_subscription.realm_id,
                     email_type="payment_succeeded",
                 )
+
+    # Calculate processing time and update webhook log
+    processing_time = int((time.time() - start_time) * 1000)
+    if webhook_log:
+        webhook_log.status = "processed"
+        webhook_log.processing_time_ms = processing_time
+        db.commit()
+    
+    log_info(
+        db, 
+        source="stripe_webhook",
+        action=event_type,
+        message=f"Webhook {event_type} processed successfully in {processing_time}ms",
+        details={"event_id": event_id, "processing_time_ms": processing_time}
+    )
 
     return {"status": "success"}

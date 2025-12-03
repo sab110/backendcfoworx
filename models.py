@@ -357,3 +357,47 @@ class EmailLog(Base):
 
     def __repr__(self):
         return f"<EmailLog(id={self.id}, recipient='{self.recipient_email}', type='{self.email_type}')>"
+
+
+# ------------------------------------------------------
+# SYSTEM LOG MODEL (comprehensive backend logging)
+# ------------------------------------------------------
+class SystemLog(Base):
+    __tablename__ = "system_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    level = Column(String(20), nullable=False, index=True)  # INFO, WARNING, ERROR, DEBUG
+    source = Column(String(100), nullable=False, index=True)  # e.g., "stripe_webhook", "qbo_sync", "email_service"
+    action = Column(String(100), nullable=False)  # e.g., "payment_received", "token_refresh", "report_generated"
+    message = Column(Text, nullable=False)
+    realm_id = Column(String, ForeignKey("company_info.realm_id", ondelete="SET NULL"), nullable=True, index=True)
+    details = Column(JSON, nullable=True)  # Additional context/metadata
+    error_traceback = Column(Text, nullable=True)  # For error logs
+    ip_address = Column(String(50), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+    duration_ms = Column(Integer, nullable=True)  # For performance tracking
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f"<SystemLog(id={self.id}, level='{self.level}', source='{self.source}', action='{self.action}')>"
+
+
+# ------------------------------------------------------
+# WEBHOOK LOG MODEL (for Stripe & QuickBooks webhooks)
+# ------------------------------------------------------
+class WebhookLog(Base):
+    __tablename__ = "webhook_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source = Column(String(50), nullable=False, index=True)  # "stripe", "intuit", "other"
+    event_type = Column(String(100), nullable=False, index=True)  # e.g., "invoice.payment_failed"
+    event_id = Column(String(100), nullable=True, unique=True)  # Webhook event ID
+    payload = Column(JSON, nullable=True)  # Full webhook payload
+    status = Column(String(50), default="received")  # received, processed, failed, ignored
+    error_message = Column(Text, nullable=True)
+    processing_time_ms = Column(Integer, nullable=True)
+    realm_id = Column(String, ForeignKey("company_info.realm_id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f"<WebhookLog(id={self.id}, source='{self.source}', event='{self.event_type}', status='{self.status}')>"

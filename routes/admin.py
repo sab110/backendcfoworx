@@ -17,7 +17,8 @@ from sqlalchemy import func, desc, and_
 from db import get_db
 from models import (
     CompanyInfo, Subscription, Plan, User, QuickBooksToken,
-    License, CompanyLicenseMapping, FailedPaymentLog, Submission, AdminActivityLog
+    License, CompanyLicenseMapping, FailedPaymentLog, Submission, AdminActivityLog,
+    EmailLog, SystemLog, WebhookLog
 )
 from config import (
     ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_JWT_SECRET, ADMIN_JWT_EXPIRY_HOURS,
@@ -943,6 +944,353 @@ async def get_historic_subscription_data(
 
 
 # ------------------------------------------------------
+# EMAIL LOGS ROUTES
+# ------------------------------------------------------
+@router.get("/email-logs")
+async def get_email_logs(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token),
+    page: int = 1,
+    limit: int = 100,
+    email_type: Optional[str] = None,
+    status: Optional[str] = None,
+    realm_id: Optional[str] = None
+):
+    """Get all email logs with filtering options"""
+    query = db.query(EmailLog)
+    
+    if email_type:
+        query = query.filter(EmailLog.email_type == email_type)
+    if status:
+        query = query.filter(EmailLog.status == status)
+    if realm_id:
+        query = query.filter(EmailLog.realm_id == realm_id)
+    
+    total = query.count()
+    offset = (page - 1) * limit
+    
+    logs = query.order_by(desc(EmailLog.sent_at)).offset(offset).limit(limit).all()
+    
+    result = []
+    for log in logs:
+        # Get company name if realm_id exists
+        company_name = None
+        if log.realm_id:
+            company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == log.realm_id).first()
+            company_name = company.company_name if company else None
+        
+        result.append({
+            "id": log.id,
+            "realm_id": log.realm_id,
+            "company_name": company_name,
+            "recipient_email": log.recipient_email,
+            "subject": log.subject,
+            "email_type": log.email_type,
+            "resend_id": log.resend_id,
+            "status": log.status,
+            "error_message": log.error_message,
+            "sent_at": log.sent_at.isoformat() if log.sent_at else None,
+            "created_at": log.created_at.isoformat() if log.created_at else None
+        })
+    
+    log_admin_activity(
+        db, admin.get("sub"), "view_email_logs",
+        details={"page": page, "filters": {"email_type": email_type, "status": status}},
+        request=request
+    )
+
+    return {
+        "email_logs": result,
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit
+        },
+        "stats": {
+            "total_sent": db.query(EmailLog).filter(EmailLog.status == "sent").count(),
+            "total_failed": db.query(EmailLog).filter(EmailLog.status == "failed").count(),
+            "total_bounced": db.query(EmailLog).filter(EmailLog.status == "bounced").count(),
+        }
+    }
+
+
+# ------------------------------------------------------
+# SYSTEM LOGS ROUTES
+# ------------------------------------------------------
+@router.get("/system-logs")
+async def get_system_logs(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token),
+    page: int = 1,
+    limit: int = 100,
+    level: Optional[str] = None,
+    source: Optional[str] = None,
+    realm_id: Optional[str] = None
+):
+    """Get system logs with filtering options"""
+    query = db.query(SystemLog)
+    
+    if level:
+        query = query.filter(SystemLog.level == level)
+    if source:
+        query = query.filter(SystemLog.source == source)
+    if realm_id:
+        query = query.filter(SystemLog.realm_id == realm_id)
+    
+    total = query.count()
+    offset = (page - 1) * limit
+    
+    logs = query.order_by(desc(SystemLog.created_at)).offset(offset).limit(limit).all()
+    
+    result = []
+    for log in logs:
+        company_name = None
+        if log.realm_id:
+            company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == log.realm_id).first()
+            company_name = company.company_name if company else None
+        
+        result.append({
+            "id": log.id,
+            "level": log.level,
+            "source": log.source,
+            "action": log.action,
+            "message": log.message,
+            "realm_id": log.realm_id,
+            "company_name": company_name,
+            "details": log.details,
+            "error_traceback": log.error_traceback,
+            "duration_ms": log.duration_ms,
+            "created_at": log.created_at.isoformat() if log.created_at else None
+        })
+
+    return {
+        "system_logs": result,
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit
+        },
+        "stats": {
+            "info_count": db.query(SystemLog).filter(SystemLog.level == "INFO").count(),
+            "warning_count": db.query(SystemLog).filter(SystemLog.level == "WARNING").count(),
+            "error_count": db.query(SystemLog).filter(SystemLog.level == "ERROR").count(),
+        }
+    }
+
+
+# ------------------------------------------------------
+# WEBHOOK LOGS ROUTES
+# ------------------------------------------------------
+@router.get("/webhook-logs")
+async def get_webhook_logs(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token),
+    page: int = 1,
+    limit: int = 100,
+    source: Optional[str] = None,
+    status: Optional[str] = None,
+    event_type: Optional[str] = None
+):
+    """Get webhook logs with filtering options"""
+    query = db.query(WebhookLog)
+    
+    if source:
+        query = query.filter(WebhookLog.source == source)
+    if status:
+        query = query.filter(WebhookLog.status == status)
+    if event_type:
+        query = query.filter(WebhookLog.event_type == event_type)
+    
+    total = query.count()
+    offset = (page - 1) * limit
+    
+    logs = query.order_by(desc(WebhookLog.created_at)).offset(offset).limit(limit).all()
+    
+    result = []
+    for log in logs:
+        company_name = None
+        if log.realm_id:
+            company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == log.realm_id).first()
+            company_name = company.company_name if company else None
+        
+        result.append({
+            "id": log.id,
+            "source": log.source,
+            "event_type": log.event_type,
+            "event_id": log.event_id,
+            "status": log.status,
+            "error_message": log.error_message,
+            "processing_time_ms": log.processing_time_ms,
+            "realm_id": log.realm_id,
+            "company_name": company_name,
+            "created_at": log.created_at.isoformat() if log.created_at else None
+        })
+    
+    log_admin_activity(
+        db, admin.get("sub"), "view_webhook_logs",
+        details={"page": page, "source": source, "status": status},
+        request=request
+    )
+
+    return {
+        "webhook_logs": result,
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit
+        },
+        "stats": {
+            "stripe_count": db.query(WebhookLog).filter(WebhookLog.source == "stripe").count(),
+            "intuit_count": db.query(WebhookLog).filter(WebhookLog.source == "intuit").count(),
+            "processed_count": db.query(WebhookLog).filter(WebhookLog.status == "processed").count(),
+            "failed_count": db.query(WebhookLog).filter(WebhookLog.status == "failed").count(),
+        }
+    }
+
+
+# ------------------------------------------------------
+# LICENSE MAPPINGS ROUTES
+# ------------------------------------------------------
+@router.get("/license-mappings")
+async def get_all_license_mappings(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token),
+    page: int = 1,
+    limit: int = 100,
+    realm_id: Optional[str] = None,
+    is_active: Optional[str] = None
+):
+    """Get all license mappings across all companies"""
+    query = db.query(CompanyLicenseMapping)
+    
+    if realm_id:
+        query = query.filter(CompanyLicenseMapping.realm_id == realm_id)
+    if is_active:
+        query = query.filter(CompanyLicenseMapping.is_active == is_active)
+    
+    total = query.count()
+    offset = (page - 1) * limit
+    
+    mappings = query.order_by(desc(CompanyLicenseMapping.created_at)).offset(offset).limit(limit).all()
+    
+    result = []
+    for mapping in mappings:
+        # Get company info
+        company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == mapping.realm_id).first()
+        # Get license info
+        license_info = db.query(License).filter(License.franchise_number == mapping.franchise_number).first()
+        
+        result.append({
+            "id": mapping.id,
+            "realm_id": mapping.realm_id,
+            "company_name": company.company_name if company else None,
+            "franchise_number": mapping.franchise_number,
+            "license_name": license_info.name if license_info else None,
+            "license_owner": license_info.owner if license_info else None,
+            "license_city": license_info.city if license_info else None,
+            "license_state": license_info.state if license_info else None,
+            "qbo_department_id": mapping.qbo_department_id,
+            "qbo_department_name": mapping.qbo_department_name,
+            "is_active": mapping.is_active,
+            "created_at": mapping.created_at.isoformat() if mapping.created_at else None,
+            "updated_at": mapping.updated_at.isoformat() if mapping.updated_at else None,
+            "last_synced_at": mapping.last_synced_at.isoformat() if mapping.last_synced_at else None
+        })
+    
+    # Get stats
+    total_mappings = db.query(CompanyLicenseMapping).count()
+    active_mappings = db.query(CompanyLicenseMapping).filter(CompanyLicenseMapping.is_active == "true").count()
+    inactive_mappings = db.query(CompanyLicenseMapping).filter(CompanyLicenseMapping.is_active == "false").count()
+    companies_with_mappings = db.query(CompanyLicenseMapping.realm_id).distinct().count()
+    
+    log_admin_activity(
+        db, admin.get("sub"), "view_license_mappings",
+        details={"page": page, "realm_id": realm_id, "is_active": is_active},
+        request=request
+    )
+
+    return {
+        "license_mappings": result,
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit
+        },
+        "stats": {
+            "total_mappings": total_mappings,
+            "active_mappings": active_mappings,
+            "inactive_mappings": inactive_mappings,
+            "companies_with_mappings": companies_with_mappings
+        }
+    }
+
+
+@router.get("/licenses")
+async def get_all_licenses(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token),
+    page: int = 1,
+    limit: int = 100,
+    search: Optional[str] = None
+):
+    """Get all available licenses (franchise list)"""
+    query = db.query(License)
+    
+    if search:
+        query = query.filter(
+            (License.franchise_number.ilike(f"%{search}%")) |
+            (License.name.ilike(f"%{search}%")) |
+            (License.owner.ilike(f"%{search}%")) |
+            (License.city.ilike(f"%{search}%"))
+        )
+    
+    total = query.count()
+    offset = (page - 1) * limit
+    
+    licenses = query.order_by(License.franchise_number).offset(offset).limit(limit).all()
+    
+    result = []
+    for lic in licenses:
+        # Count how many companies have this license mapped
+        mapping_count = db.query(CompanyLicenseMapping).filter(
+            CompanyLicenseMapping.franchise_number == lic.franchise_number
+        ).count()
+        
+        result.append({
+            "id": lic.id,
+            "franchise_number": lic.franchise_number,
+            "name": lic.name,
+            "owner": lic.owner,
+            "address": lic.address,
+            "city": lic.city,
+            "state": lic.state,
+            "zip_code": lic.zip_code,
+            "mapping_count": mapping_count,
+            "created_at": lic.created_at.isoformat() if lic.created_at else None,
+            "updated_at": lic.updated_at.isoformat() if lic.updated_at else None
+        })
+
+    return {
+        "licenses": result,
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit
+        }
+    }
+
+
+# ------------------------------------------------------
 # DASHBOARD OVERVIEW
 # ------------------------------------------------------
 @router.get("/dashboard")
@@ -1009,6 +1357,21 @@ async def get_admin_dashboard(
         )
     ).count()
     
+    # Email stats
+    total_emails = db.query(EmailLog).count()
+    failed_emails = db.query(EmailLog).filter(EmailLog.status == "failed").count()
+    
+    # Webhook stats
+    total_webhooks = db.query(WebhookLog).count()
+    failed_webhooks = db.query(WebhookLog).filter(WebhookLog.status == "failed").count()
+    
+    # System log stats
+    error_logs = db.query(SystemLog).filter(SystemLog.level == "ERROR").count()
+    
+    # License mapping stats
+    total_mappings = db.query(CompanyLicenseMapping).count()
+    active_mappings = db.query(CompanyLicenseMapping).filter(CompanyLicenseMapping.is_active == "true").count()
+    
     log_admin_activity(
         db, admin.get("sub"), "view_dashboard",
         request=request
@@ -1025,12 +1388,21 @@ async def get_admin_dashboard(
             "estimated_mrr": f"${mrr:.2f}",
             "unresolved_failed_payments": unresolved_failed_payments,
             "pending_submissions": pending_submissions,
-            "upcoming_renewals_7_days": upcoming_renewals
+            "upcoming_renewals_7_days": upcoming_renewals,
+            "total_emails_sent": total_emails,
+            "failed_emails": failed_emails,
+            "total_webhooks": total_webhooks,
+            "failed_webhooks": failed_webhooks,
+            "error_logs_count": error_logs,
+            "total_license_mappings": total_mappings,
+            "active_license_mappings": active_mappings
         },
         "alerts": {
             "has_failed_payments": unresolved_failed_payments > 0,
             "has_past_due": past_due_subscriptions > 0,
-            "has_pending_submissions": pending_submissions > 0
+            "has_pending_submissions": pending_submissions > 0,
+            "has_error_logs": error_logs > 0,
+            "has_failed_webhooks": failed_webhooks > 0
         }
     }
 

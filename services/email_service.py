@@ -4,6 +4,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from sqlalchemy.orm import Session
 from config import RESEND_API_KEY, EMAIL_FROM, FRONTEND_URL
+from services.logging_service import log_info, log_error
 
 
 class EmailService:
@@ -123,6 +124,16 @@ class EmailService:
                         resend_id=resend_id,
                         status="sent",
                     )
+                
+                # Also log to system logs
+                log_info(
+                    db,
+                    source="email_service",
+                    action="email_sent",
+                    message=f"Email sent: {email_type} to {len(to)} recipient(s)",
+                    realm_id=realm_id,
+                    details={"recipients": to, "subject": subject, "email_type": email_type, "resend_id": resend_id}
+                )
 
             return {"success": True, "id": resend_id}
 
@@ -142,6 +153,16 @@ class EmailService:
                         status="failed",
                         error_message=error_msg,
                     )
+                
+                # Also log to system logs
+                log_error(
+                    db,
+                    source="email_service",
+                    action="email_failed",
+                    message=f"Email failed: {email_type} to {len(to)} recipient(s) - {error_msg}",
+                    realm_id=realm_id,
+                    details={"recipients": to, "subject": subject, "email_type": email_type, "error": error_msg}
+                )
 
             return {"success": False, "error": error_msg}
 
