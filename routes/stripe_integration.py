@@ -123,6 +123,44 @@ def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_d
                 db=db,
                 realm_id=realm_id,
             )
+        elif email_type == "subscription_updated":
+            # Custom subscription updated email
+            details = extra_data or {}
+            subject = "📋 Your CFO Worx Subscription Has Been Updated"
+            html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head><meta charset="utf-8"></head>
+            <body style="margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background-color: #f4f7fa;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                    <div style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); border-radius: 16px 16px 0 0; padding: 40px 30px; text-align: center;">
+                        <h1 style="color: #fff; margin: 0; font-size: 28px;">📋 Subscription Updated</h1>
+                    </div>
+                    <div style="background: #fff; padding: 40px 30px; border-radius: 0 0 16px 16px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+                        <p style="color: #334155; font-size: 16px;">Hi <strong>{company_name}</strong>,</p>
+                        <p style="color: #334155; font-size: 16px;">Your CFO Worx subscription has been updated. Here are the details:</p>
+                        <div style="background: #f8fafc; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                            <p style="margin: 8px 0; color: #334155;"><strong>Plan:</strong> {details.get('plan', 'N/A')}</p>
+                            <p style="margin: 8px 0; color: #334155;"><strong>Licenses:</strong> {details.get('quantity', 1)}</p>
+                            <p style="margin: 8px 0; color: #334155;"><strong>Status:</strong> <span style="color: {'#16a34a' if details.get('status') == 'active' else '#d97706'};">{details.get('status', 'N/A').upper()}</span></p>
+                        </div>
+                        <p style="color: #64748b; font-size: 14px;">You can view and manage your subscription from your dashboard.</p>
+                        <div style="text-align: center; margin: 30px 0;">
+                            <a href="{FRONTEND_URL}/dashboard" style="display: inline-block; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600;">Go to Dashboard</a>
+                        </div>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            result = email_service.send_email(
+                to=recipients,
+                subject=subject,
+                html=html,
+                db=db,
+                realm_id=realm_id,
+                email_type="billing",
+            )
         else:
             print(f"⚠️ Unknown email type: {email_type}")
             return False
@@ -509,6 +547,9 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             Subscription.stripe_subscription_id == stripe_sub_id
         ).first()
         if db_subscription:
+            old_status = db_subscription.status
+            old_quantity = db_subscription.quantity
+            
             db_subscription.status = status
             if plan:
                 db_subscription.plan_id = plan.id
@@ -520,6 +561,20 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db_subscription.updated_at = datetime.utcnow()
             db.commit()
             print(f"✅ Updated subscription: status={status}, plan={plan.name if plan else 'Unknown'}, quantity={quantity}, next_billing={end_date}")
+            
+            # Send subscription updated email
+            send_subscription_email(
+                db=db,
+                realm_id=db_subscription.realm_id,
+                email_type="subscription_updated",
+                extra_data={
+                    "plan": plan.name if plan else "Unknown",
+                    "quantity": quantity,
+                    "status": status,
+                    "old_status": old_status,
+                    "old_quantity": old_quantity,
+                }
+            )
         else:
             print(f"⚠️  Subscription not found in database: {stripe_sub_id}")
 
