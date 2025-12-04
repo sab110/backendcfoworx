@@ -6,7 +6,7 @@ import stripe
 from datetime import datetime
 import time
 from config import STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, FRONTEND_URL
-from services.logging_service import LoggingService, log_info, log_error, log_webhook
+from services.logging_service import LoggingService, log_info, log_error, log_webhook, log_tenant_activity
 
 
 router = APIRouter()
@@ -498,6 +498,21 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db.commit()
             print(f"💾 Subscription saved for company {company.company_name} (realm_id: {realm_id}) - Plan: {plan.name if plan else 'Unknown'} ({plan.billing_cycle if plan else 'N/A'}) × {quantity} licenses")
             
+            # Log tenant activity
+            log_tenant_activity(
+                db,
+                realm_id=realm_id,
+                action="subscription_created",
+                category="billing",
+                description=f"Subscribed to {plan.name if plan else 'Unknown'} plan with {quantity} license(s)",
+                details={
+                    "plan_name": plan.name if plan else None,
+                    "plan_id": plan.id if plan else None,
+                    "quantity": quantity,
+                    "stripe_subscription_id": stripe_subscription_id,
+                }
+            )
+            
             # Send subscription confirmation email
             send_subscription_email(
                 db=db,
@@ -642,6 +657,17 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db_subscription.status = "canceled"
             db.commit()
             print(f"✅ Marked subscription as canceled")
+            
+            # Log tenant activity for cancellation
+            if not was_already_canceled:
+                log_tenant_activity(
+                    db,
+                    realm_id=realm_id,
+                    action="subscription_canceled",
+                    category="billing",
+                    description="Subscription canceled",
+                    details={"stripe_subscription_id": stripe_sub_id}
+                )
             
             # Only send cancellation email if we haven't already sent one
             # (we send it immediately when cancel_at_period_end is set)

@@ -6,7 +6,7 @@ Logs are stored in the database for admin dashboard visibility.
 """
 
 from sqlalchemy.orm import Session
-from models import SystemLog, WebhookLog
+from models import SystemLog, WebhookLog, TenantActivityLog
 from datetime import datetime
 import traceback
 from typing import Optional, Dict, Any
@@ -177,6 +177,61 @@ class LoggingService:
         return redact(payload)
 
 
+    @staticmethod
+    def log_tenant_activity(
+        db: Session,
+        realm_id: str,
+        action: str,
+        category: str,
+        description: str = None,
+        user_id: int = None,
+        user_email: str = None,
+        details: Dict[str, Any] = None,
+        ip_address: str = None,
+        user_agent: str = None
+    ) -> TenantActivityLog:
+        """
+        Create a tenant/user activity log entry
+        
+        Args:
+            db: Database session
+            realm_id: Company realm ID
+            action: Action performed (login, subscribe, view_report, etc.)
+            category: Category (auth, billing, license, report, settings, qbo)
+            description: Human-readable description
+            user_id: User ID (optional)
+            user_email: User email (optional)
+            details: Additional JSON details (optional)
+            ip_address: Request IP address (optional)
+            user_agent: Request user agent (optional)
+        
+        Returns:
+            Created TenantActivityLog instance
+        """
+        log_entry = TenantActivityLog(
+            realm_id=realm_id,
+            user_id=user_id,
+            user_email=user_email,
+            action=action,
+            category=category,
+            description=description,
+            details=details,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            created_at=datetime.utcnow()
+        )
+        
+        try:
+            db.add(log_entry)
+            db.commit()
+            db.refresh(log_entry)
+            return log_entry
+        except Exception as e:
+            db.rollback()
+            print(f"Failed to save tenant activity log: {str(e)}")
+            return None
+
+
 # Convenience functions for quick logging
 def log_info(db: Session, source: str, action: str, message: str, **kwargs):
     return LoggingService.info(db, source, action, message, **kwargs)
@@ -189,4 +244,7 @@ def log_error(db: Session, source: str, action: str, message: str, **kwargs):
 
 def log_webhook(db: Session, source: str, event_type: str, **kwargs):
     return LoggingService.log_webhook(db, source, event_type, **kwargs)
+
+def log_tenant_activity(db: Session, realm_id: str, action: str, category: str, **kwargs):
+    return LoggingService.log_tenant_activity(db, realm_id, action, category, **kwargs)
 

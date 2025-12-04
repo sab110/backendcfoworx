@@ -401,3 +401,25 @@ class WebhookLog(Base):
 
     def __repr__(self):
         return f"<WebhookLog(id={self.id}, source='{self.source}', event='{self.event_type}', status='{self.status}')>"
+
+
+# ------------------------------------------------------
+# TENANT ACTIVITY LOG MODEL (for user/client activity)
+# ------------------------------------------------------
+class TenantActivityLog(Base):
+    __tablename__ = "tenant_activity_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    realm_id = Column(String, ForeignKey("company_info.realm_id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    user_email = Column(String(255), nullable=True)
+    action = Column(String(100), nullable=False, index=True)  # e.g., "login", "subscribe", "view_report", "update_license"
+    category = Column(String(50), nullable=False, index=True)  # "auth", "billing", "license", "report", "settings", "qbo"
+    description = Column(Text, nullable=True)
+    details = Column(JSON, nullable=True)  # Additional context/metadata
+    ip_address = Column(String(50), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f"<TenantActivityLog(id={self.id}, realm_id='{self.realm_id}', action='{self.action}')>"

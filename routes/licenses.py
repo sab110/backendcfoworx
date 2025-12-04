@@ -845,6 +845,8 @@ async def update_company_license_mapping(
         )
     
     # Update the mapping
+    old_is_active = mapping.is_active
+    
     if "is_active" in payload:
         # Handle both boolean and string values
         is_active_value = payload["is_active"]
@@ -855,6 +857,22 @@ async def update_company_license_mapping(
     
     mapping.updated_at = datetime.utcnow()
     db.commit()
+    
+    # Log tenant activity if status changed
+    if old_is_active != mapping.is_active:
+        try:
+            from services.logging_service import log_tenant_activity
+            action = "license_activated" if mapping.is_active == "true" else "license_deactivated"
+            log_tenant_activity(
+                db,
+                realm_id=realm_id,
+                action=action,
+                category="license",
+                description=f"Franchise #{franchise_number} {action.split('_')[1]}",
+                details={"franchise_number": franchise_number, "is_active": mapping.is_active}
+            )
+        except Exception as log_err:
+            print(f"Failed to log tenant activity: {log_err}")
     
     return {
         "message": f"License mapping for {franchise_number} updated",

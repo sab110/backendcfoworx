@@ -18,7 +18,7 @@ from db import get_db
 from models import (
     CompanyInfo, Subscription, Plan, User, QuickBooksToken,
     License, CompanyLicenseMapping, FailedPaymentLog, Submission, AdminActivityLog,
-    EmailLog, SystemLog, WebhookLog
+    EmailLog, SystemLog, WebhookLog, TenantActivityLog
 )
 from config import (
     ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_JWT_SECRET, ADMIN_JWT_EXPIRY_HOURS,
@@ -1297,6 +1297,94 @@ async def get_all_licenses(
             "limit": limit,
             "total": total,
             "total_pages": (total + limit - 1) // limit
+        }
+    }
+
+
+# ------------------------------------------------------
+# TENANT ACTIVITY LOGS ROUTES
+# ------------------------------------------------------
+@router.get("/tenant-logs")
+async def get_tenant_logs(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token),
+    page: int = 1,
+    limit: int = 100,
+    realm_id: Optional[str] = None,
+    category: Optional[str] = None,
+    action: Optional[str] = None,
+    user_email: Optional[str] = None
+):
+    """Get tenant/user activity logs with filtering options"""
+    query = db.query(TenantActivityLog)
+    
+    if realm_id:
+        query = query.filter(TenantActivityLog.realm_id == realm_id)
+    if category:
+        query = query.filter(TenantActivityLog.category == category)
+    if action:
+        query = query.filter(TenantActivityLog.action == action)
+    if user_email:
+        query = query.filter(TenantActivityLog.user_email.ilike(f"%{user_email}%"))
+    
+    total = query.count()
+    offset = (page - 1) * limit
+    
+    logs = query.order_by(desc(TenantActivityLog.created_at)).offset(offset).limit(limit).all()
+    
+    result = []
+    for log in logs:
+        company_name = None
+        if log.realm_id:
+            company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == log.realm_id).first()
+            company_name = company.company_name if company else None
+        
+        result.append({
+            "id": log.id,
+            "realm_id": log.realm_id,
+            "company_name": company_name,
+            "user_id": log.user_id,
+            "user_email": log.user_email,
+            "action": log.action,
+            "category": log.category,
+            "description": log.description,
+            "details": log.details,
+            "ip_address": log.ip_address,
+            "created_at": log.created_at.isoformat() if log.created_at else None
+        })
+    
+    # Get unique categories and actions for filters
+    all_categories = db.query(TenantActivityLog.category).distinct().all()
+    all_actions = db.query(TenantActivityLog.action).distinct().all()
+    all_companies = db.query(TenantActivityLog.realm_id, CompanyInfo.company_name).join(
+        CompanyInfo, TenantActivityLog.realm_id == CompanyInfo.realm_id
+    ).distinct().all()
+    
+    log_admin_activity(
+        db, admin.get("sub"), "view_tenant_logs",
+        details={"page": page, "filters": {"realm_id": realm_id, "category": category, "action": action}},
+        request=request
+    )
+
+    return {
+        "tenant_logs": result,
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit
+        },
+        "filters": {
+            "categories": [c[0] for c in all_categories if c[0]],
+            "actions": [a[0] for a in all_actions if a[0]],
+            "companies": [{"realm_id": c[0], "name": c[1]} for c in all_companies if c[0]]
+        },
+        "stats": {
+            "total_logs": db.query(TenantActivityLog).count(),
+            "auth_logs": db.query(TenantActivityLog).filter(TenantActivityLog.category == "auth").count(),
+            "billing_logs": db.query(TenantActivityLog).filter(TenantActivityLog.category == "billing").count(),
+            "license_logs": db.query(TenantActivityLog).filter(TenantActivityLog.category == "license").count(),
         }
     }
 

@@ -126,6 +126,22 @@ async def store_qbo_oauth(payload: dict, db: Session = Depends(get_db)):
             db.add(token_entry)
 
         db.commit()
+        
+        # Log tenant activity
+        try:
+            from services.logging_service import log_tenant_activity
+            log_tenant_activity(
+                db,
+                realm_id=realm_id,
+                action="qbo_connected",
+                category="qbo",
+                description=f"QuickBooks account connected for user {email}",
+                user_id=user_id,
+                user_email=email,
+                details={"realm_id": realm_id, "user_email": email}
+            )
+        except Exception as log_err:
+            print(f"Failed to log tenant activity: {log_err}")
 
         return {
             "message": "QuickBooks connection successful",
