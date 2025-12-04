@@ -10,7 +10,7 @@ Provides admin-only endpoints for managing the platform including:
 - View historic data and activity logs
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Header
+from fastapi import APIRouter, Depends, HTTPException, Request, Header, UploadFile, File
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, and_
@@ -28,6 +28,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 import jwt
 import stripe
+import csv
+import io
 
 router = APIRouter()
 security = HTTPBearer()
@@ -1503,5 +1505,400 @@ async def get_admin_dashboard(
             "has_error_logs": error_logs > 0,
             "has_failed_webhooks": failed_webhooks > 0
         }
+    }
+
+
+# ------------------------------------------------------
+# CSV UPLOAD FOR LICENSES/FRANCHISES
+# ------------------------------------------------------
+@router.post("/licenses/upload-csv")
+async def upload_licenses_csv(
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token)
+):
+    """
+    Upload a CSV file to bulk create/update licenses.
+    Expected CSV columns: franchise_number, name, owner, address, city, state, zip_code
+    """
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="File must be a CSV")
+    
+    try:
+        contents = await file.read()
+        decoded = contents.decode('utf-8')
+        reader = csv.DictReader(io.StringIO(decoded))
+        
+        created = []
+        updated = []
+        skipped = []
+        errors = []
+        
+        row_number = 1
+        for row in reader:
+            row_number += 1
+            try:
+                # Normalize column names (handle various formats)
+                normalized = {}
+                for key, value in row.items():
+                    if key:
+                        clean_key = key.strip().lower().replace(' ', '_').replace('-', '_')
+                        normalized[clean_key] = value.strip() if value else None
+                
+                # Extract franchise number (try various column names)
+                franchise_number = (
+                    normalized.get('franchise_number') or 
+                    normalized.get('franchise_no') or 
+                    normalized.get('franchiseno') or
+                    normalized.get('license_number') or
+                    normalized.get('number') or
+                    normalized.get('id')
+                )
+                
+                if not franchise_number:
+                    skipped.append({
+                        "row": row_number,
+                        "reason": "Missing franchise number",
+                        "data": dict(row)
+                    })
+                    continue
+                
+                # Clean franchise number (remove any leading zeros if needed)
+                franchise_number = str(franchise_number).strip()
+                
+                # Check if license exists
+                existing = db.query(License).filter(License.franchise_number == franchise_number).first()
+                
+                # Extract other fields
+                name = (
+                    normalized.get('name') or 
+                    normalized.get('franchise_name') or 
+                    normalized.get('business_name')
+                )
+                owner = (
+                    normalized.get('owner') or 
+                    normalized.get('owner_name') or 
+                    normalized.get('franchisee')
+                )
+                address = (
+                    normalized.get('address') or 
+                    normalized.get('street') or 
+                    normalized.get('street_address')
+                )
+                city = normalized.get('city')
+                state = normalized.get('state')
+                zip_code = (
+                    normalized.get('zip_code') or 
+                    normalized.get('zip') or 
+                    normalized.get('postal_code')
+                )
+                
+                if existing:
+                    # Update existing license
+                    if name:
+                        existing.name = name
+                    if owner:
+                        existing.owner = owner
+                    if address:
+                        existing.address = address
+                    if city:
+                        existing.city = city
+                    if state:
+                        existing.state = state.upper() if state else None
+                    if zip_code:
+                        existing.zip_code = zip_code
+                    existing.updated_at = datetime.utcnow()
+                    updated.append(franchise_number)
+                else:
+                    # Create new license
+                    new_license = License(
+                        franchise_number=franchise_number,
+                        name=name,
+                        owner=owner,
+                        address=address,
+                        city=city,
+                        state=state.upper() if state else None,
+                        zip_code=zip_code
+                    )
+                    db.add(new_license)
+                    created.append(franchise_number)
+                    
+            except Exception as row_error:
+                errors.append({
+                    "row": row_number,
+                    "error": str(row_error),
+                    "data": dict(row)
+                })
+        
+        db.commit()
+        
+        log_admin_activity(
+            db, admin.get("sub"), "upload_licenses_csv",
+            details={
+                "filename": file.filename,
+                "created_count": len(created),
+                "updated_count": len(updated),
+                "skipped_count": len(skipped),
+                "error_count": len(errors)
+            },
+            request=request
+        )
+        
+        return {
+            "success": True,
+            "message": f"CSV processed successfully",
+            "summary": {
+                "total_rows": row_number - 1,
+                "created": len(created),
+                "updated": len(updated),
+                "skipped": len(skipped),
+                "errors": len(errors)
+            },
+            "created_licenses": created[:50],  # Limit to first 50 for response size
+            "updated_licenses": updated[:50],
+            "skipped": skipped[:20],  # Show first 20 skipped
+            "errors": errors[:20]  # Show first 20 errors
+        }
+        
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid CSV file encoding. Please use UTF-8.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing CSV: {str(e)}")
+
+
+@router.get("/licenses/csv-template")
+async def download_csv_template(
+    admin: dict = Depends(verify_admin_token)
+):
+    """
+    Get the expected CSV template format for license uploads
+    """
+    return {
+        "columns": [
+            {"name": "franchise_number", "required": True, "description": "Unique franchise identifier"},
+            {"name": "name", "required": False, "description": "Franchise business name"},
+            {"name": "owner", "required": False, "description": "Owner/franchisee name"},
+            {"name": "address", "required": False, "description": "Street address"},
+            {"name": "city", "required": False, "description": "City"},
+            {"name": "state", "required": False, "description": "State (2-letter code)"},
+            {"name": "zip_code", "required": False, "description": "ZIP/Postal code"}
+        ],
+        "sample_row": {
+            "franchise_number": "10001",
+            "name": "SERVPRO of Downtown",
+            "owner": "John Smith",
+            "address": "123 Main St",
+            "city": "Dallas",
+            "state": "TX",
+            "zip_code": "75201"
+        },
+        "notes": [
+            "First row should contain column headers",
+            "franchise_number is the only required field",
+            "State codes should be 2 letters (e.g., TX, CA, NY)",
+            "Existing licenses will be updated, new ones will be created",
+            "File must be UTF-8 encoded"
+        ]
+    }
+
+
+# ------------------------------------------------------
+# SUBSCRIPTION SYNC - Update Stripe quantity to match active licenses
+# ------------------------------------------------------
+@router.post("/subscriptions/{realm_id}/sync-quantity")
+async def sync_subscription_quantity(
+    realm_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token)
+):
+    """
+    Sync a company's Stripe subscription quantity with their active license count.
+    This updates the subscription to bill for the correct number of active franchises.
+    """
+    # Get subscription
+    subscription = db.query(Subscription).filter(Subscription.realm_id == realm_id).first()
+    if not subscription:
+        raise HTTPException(status_code=404, detail="No subscription found for this company")
+    
+    if not subscription.stripe_subscription_id:
+        raise HTTPException(status_code=400, detail="No Stripe subscription ID found")
+    
+    if subscription.status != "active":
+        raise HTTPException(status_code=400, detail=f"Subscription is {subscription.status}, not active")
+    
+    # Count active licenses
+    active_count = db.query(CompanyLicenseMapping).filter(
+        CompanyLicenseMapping.realm_id == realm_id,
+        CompanyLicenseMapping.is_active == "true"
+    ).count()
+    
+    if active_count < 1:
+        raise HTTPException(status_code=400, detail="Must have at least 1 active license")
+    
+    old_quantity = subscription.quantity or 0
+    
+    if active_count == old_quantity:
+        return {
+            "success": True,
+            "message": "Subscription quantity already matches active license count",
+            "quantity": active_count,
+            "no_change": True
+        }
+    
+    try:
+        # Update Stripe subscription
+        stripe_sub = stripe.Subscription.retrieve(subscription.stripe_subscription_id)
+        
+        # Get the subscription item ID
+        if not stripe_sub.get("items") or not stripe_sub["items"].get("data"):
+            raise HTTPException(status_code=500, detail="Could not retrieve subscription items from Stripe")
+        
+        item_id = stripe_sub["items"]["data"][0]["id"]
+        
+        # Update the quantity
+        stripe.SubscriptionItem.modify(
+            item_id,
+            quantity=active_count,
+            proration_behavior="create_prorations"  # Prorate the change
+        )
+        
+        # Update local database
+        subscription.quantity = active_count
+        subscription.updated_at = datetime.utcnow()
+        db.commit()
+        
+        # Get company name for logging
+        company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == realm_id).first()
+        
+        log_admin_activity(
+            db, admin.get("sub"), "sync_subscription_quantity",
+            resource_type="subscription",
+            resource_id=realm_id,
+            details={
+                "company_name": company.company_name if company else None,
+                "old_quantity": old_quantity,
+                "new_quantity": active_count,
+                "stripe_subscription_id": subscription.stripe_subscription_id
+            },
+            request=request
+        )
+        
+        return {
+            "success": True,
+            "message": f"Subscription quantity updated from {old_quantity} to {active_count}",
+            "old_quantity": old_quantity,
+            "new_quantity": active_count,
+            "company_name": company.company_name if company else None
+        }
+        
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=500, detail=f"Stripe error: {str(e)}")
+
+
+@router.post("/subscriptions/sync-all-quantities")
+async def sync_all_subscription_quantities(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token)
+):
+    """
+    Sync ALL active subscriptions to match their active license counts.
+    Use with caution - this will update billing for all companies.
+    """
+    results = {
+        "synced": [],
+        "already_synced": [],
+        "errors": [],
+        "skipped": []
+    }
+    
+    # Get all active subscriptions
+    subscriptions = db.query(Subscription).filter(Subscription.status == "active").all()
+    
+    for sub in subscriptions:
+        if not sub.stripe_subscription_id:
+            results["skipped"].append({
+                "realm_id": sub.realm_id,
+                "reason": "No Stripe subscription ID"
+            })
+            continue
+        
+        try:
+            # Count active licenses
+            active_count = db.query(CompanyLicenseMapping).filter(
+                CompanyLicenseMapping.realm_id == sub.realm_id,
+                CompanyLicenseMapping.is_active == "true"
+            ).count()
+            
+            if active_count < 1:
+                results["skipped"].append({
+                    "realm_id": sub.realm_id,
+                    "reason": "No active licenses"
+                })
+                continue
+            
+            old_quantity = sub.quantity or 0
+            
+            if active_count == old_quantity:
+                results["already_synced"].append({
+                    "realm_id": sub.realm_id,
+                    "quantity": active_count
+                })
+                continue
+            
+            # Update Stripe
+            stripe_sub = stripe.Subscription.retrieve(sub.stripe_subscription_id)
+            item_id = stripe_sub["items"]["data"][0]["id"]
+            
+            stripe.SubscriptionItem.modify(
+                item_id,
+                quantity=active_count,
+                proration_behavior="create_prorations"
+            )
+            
+            # Update local DB
+            sub.quantity = active_count
+            sub.updated_at = datetime.utcnow()
+            
+            company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == sub.realm_id).first()
+            
+            results["synced"].append({
+                "realm_id": sub.realm_id,
+                "company_name": company.company_name if company else None,
+                "old_quantity": old_quantity,
+                "new_quantity": active_count
+            })
+            
+        except Exception as e:
+            results["errors"].append({
+                "realm_id": sub.realm_id,
+                "error": str(e)
+            })
+    
+    db.commit()
+    
+    log_admin_activity(
+        db, admin.get("sub"), "sync_all_subscription_quantities",
+        details={
+            "synced_count": len(results["synced"]),
+            "already_synced_count": len(results["already_synced"]),
+            "error_count": len(results["errors"]),
+            "skipped_count": len(results["skipped"])
+        },
+        request=request
+    )
+    
+    return {
+        "success": True,
+        "summary": {
+            "total_active_subscriptions": len(subscriptions),
+            "synced": len(results["synced"]),
+            "already_synced": len(results["already_synced"]),
+            "errors": len(results["errors"]),
+            "skipped": len(results["skipped"])
+        },
+        "details": results
     }
 
