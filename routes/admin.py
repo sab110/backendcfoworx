@@ -1528,7 +1528,8 @@ async def upload_licenses_csv(
     
     try:
         contents = await file.read()
-        decoded = contents.decode('utf-8')
+        # Handle BOM (Byte Order Mark) that Excel adds to CSV files
+        decoded = contents.decode('utf-8-sig')  # utf-8-sig automatically strips BOM
         reader = csv.DictReader(io.StringIO(decoded))
         
         created = []
@@ -1954,13 +1955,15 @@ async def get_user_queries(
     status: Optional[str] = None,
     subject: Optional[str] = None,
     search: Optional[str] = None,
+    sort_by: Optional[str] = "created_at",
+    sort_dir: Optional[str] = "desc",
     page: int = 1,
     limit: int = 20,
     db: Session = Depends(get_db),
     admin: dict = Depends(verify_admin_token)
 ):
     """
-    Admin endpoint - Get all user queries with filtering and pagination
+    Admin endpoint - Get all user queries with filtering, sorting, and pagination
     """
     log_admin_activity(db, admin.get("sub"), "view_user_queries", request=request)
     
@@ -1982,9 +1985,16 @@ async def get_user_queries(
     # Get total count
     total = query.count()
     
+    # Apply sorting
+    sort_column = getattr(UserQuery, sort_by, UserQuery.created_at)
+    if sort_dir == "asc":
+        query = query.order_by(sort_column.asc())
+    else:
+        query = query.order_by(sort_column.desc())
+    
     # Apply pagination
     offset = (page - 1) * limit
-    queries = query.order_by(desc(UserQuery.created_at)).offset(offset).limit(limit).all()
+    queries = query.offset(offset).limit(limit).all()
     
     return {
         "queries": [
