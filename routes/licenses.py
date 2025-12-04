@@ -3,11 +3,84 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 from db import get_db
-from models import License, CompanyLicenseMapping, CompanyInfo, QuickBooksToken
+from models import License, CompanyLicenseMapping, CompanyInfo, QuickBooksToken, Subscription
 from datetime import datetime, timedelta
 import requests
 import re
-from config import ENVIRONMENT
+import stripe
+from config import ENVIRONMENT, STRIPE_SECRET_KEY
+
+stripe.api_key = STRIPE_SECRET_KEY
+
+
+async def sync_subscription_quantity(db: Session, realm_id: str):
+    """
+    Sync Stripe subscription quantity with the number of active licenses.
+    This should be called after any license activation/deactivation.
+    """
+    try:
+        # Get subscription
+        subscription = db.query(Subscription).filter(Subscription.realm_id == realm_id).first()
+        if not subscription or not subscription.stripe_subscription_id:
+            print(f"⚠️ No subscription found for {realm_id}, skipping sync")
+            return None
+        
+        if subscription.status != "active":
+            print(f"⚠️ Subscription not active for {realm_id}, skipping sync")
+            return None
+        
+        # Count active licenses
+        active_count = db.query(CompanyLicenseMapping).filter(
+            CompanyLicenseMapping.realm_id == realm_id,
+            CompanyLicenseMapping.is_active == "true"
+        ).count()
+        
+        if active_count < 1:
+            print(f"⚠️ No active licenses for {realm_id}, keeping at least 1")
+            active_count = 1
+        
+        # Check if update is needed
+        if subscription.quantity == active_count:
+            print(f"ℹ️ Subscription quantity already {active_count} for {realm_id}")
+            return {"no_change": True, "quantity": active_count}
+        
+        old_quantity = subscription.quantity or 0
+        
+        # Update Stripe subscription
+        stripe_sub = stripe.Subscription.retrieve(subscription.stripe_subscription_id)
+        
+        if not stripe_sub.get("items") or not stripe_sub["items"].get("data"):
+            print(f"❌ Could not retrieve subscription items for {realm_id}")
+            return None
+        
+        item_id = stripe_sub["items"]["data"][0]["id"]
+        
+        # Update the quantity with proration
+        stripe.SubscriptionItem.modify(
+            item_id,
+            quantity=active_count,
+            proration_behavior="create_prorations"
+        )
+        
+        # Update local database
+        subscription.quantity = active_count
+        subscription.updated_at = datetime.utcnow()
+        db.commit()
+        
+        print(f"✅ Updated subscription for {realm_id}: {old_quantity} → {active_count} licenses")
+        
+        return {
+            "success": True,
+            "old_quantity": old_quantity,
+            "new_quantity": active_count
+        }
+        
+    except stripe.error.StripeError as e:
+        print(f"❌ Stripe error syncing subscription for {realm_id}: {str(e)}")
+        return {"error": str(e)}
+    except Exception as e:
+        print(f"❌ Error syncing subscription for {realm_id}: {str(e)}")
+        return {"error": str(e)}
 
 router = APIRouter()
 
@@ -495,13 +568,17 @@ async def save_selected_licenses(
         except Exception as e:
             print(f"⚠️ Error sending onboarding completion email: {str(e)}")
     
+    # Automatically sync Stripe subscription quantity with active licenses
+    sync_result = await sync_subscription_quantity(db, realm_id)
+    
     return {
         "message": "License selection saved successfully",
         "realm_id": realm_id,
         "total_licenses": len(all_mappings),
         "selected_count": updated_count,
         "selected_franchise_numbers": selected_franchise_numbers,
-        "onboarding_completed": True
+        "onboarding_completed": True,
+        "subscription_sync": sync_result
     }
 
 
@@ -826,6 +903,7 @@ async def update_company_license_mapping(
     """
     Update a license mapping for a company (e.g., activate/deactivate).
     Payload: { "is_active": true/false }
+    Also automatically syncs Stripe subscription quantity.
     """
     # Verify company exists
     company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
@@ -858,7 +936,8 @@ async def update_company_license_mapping(
     mapping.updated_at = datetime.utcnow()
     db.commit()
     
-    # Log tenant activity if status changed
+    # Log tenant activity and sync subscription if status changed
+    sync_result = None
     if old_is_active != mapping.is_active:
         try:
             from services.logging_service import log_tenant_activity
@@ -873,11 +952,15 @@ async def update_company_license_mapping(
             )
         except Exception as log_err:
             print(f"Failed to log tenant activity: {log_err}")
+        
+        # Automatically sync Stripe subscription quantity
+        sync_result = await sync_subscription_quantity(db, realm_id)
     
     return {
         "message": f"License mapping for {franchise_number} updated",
         "franchise_number": franchise_number,
-        "is_active": mapping.is_active
+        "is_active": mapping.is_active,
+        "subscription_sync": sync_result
     }
 
 
