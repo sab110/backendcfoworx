@@ -341,6 +341,14 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
     print(f"📦 Received event: {event_type}")
     
+    # Get IP address from request
+    client_ip = request.client.host if request.client else None
+    
+    # Try to extract realm_id from various places in the webhook data
+    initial_realm_id = None
+    if data.get("metadata", {}).get("realm_id"):
+        initial_realm_id = data["metadata"]["realm_id"]
+    
     # Log webhook received
     webhook_log = log_webhook(
         db, 
@@ -348,7 +356,8 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         event_type=event_type,
         event_id=event_id,
         status="received",
-        payload={"event_type": event_type, "object_id": data.get("id")}
+        realm_id=initial_realm_id,
+        payload={"event_type": event_type, "object_id": data.get("id"), "ip_address": client_ip}
     )
 
     # --- CHECKOUT COMPLETED ---
@@ -386,6 +395,11 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     "stripe_subscription_id": stripe_subscription_id,
                     "customer_email": customer_email
                 }
+        
+        # Update webhook log with discovered realm_id
+        if webhook_log and realm_id:
+            webhook_log.realm_id = realm_id
+            db.commit()
 
         # Verify company exists
         company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == realm_id).first()
@@ -498,6 +512,21 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db.commit()
             print(f"💾 Subscription saved for company {company.company_name} (realm_id: {realm_id}) - Plan: {plan.name if plan else 'Unknown'} ({plan.billing_cycle if plan else 'N/A'}) × {quantity} licenses")
             
+            # Get user email for logging
+            user_email_for_log = customer_email
+            user_id_for_log = None
+            if not user_email_for_log:
+                # Try to get from company info or user
+                company_for_log = db.query(CompanyInfo).filter(CompanyInfo.realm_id == realm_id).first()
+                if company_for_log:
+                    user_email_for_log = company_for_log.email
+                qb_token_for_log = db.query(QuickBooksToken).filter(QuickBooksToken.realm_id == realm_id).first()
+                if qb_token_for_log:
+                    user_for_log = db.query(User).filter(User.id == qb_token_for_log.user_id).first()
+                    if user_for_log:
+                        user_email_for_log = user_for_log.email
+                        user_id_for_log = user_for_log.id
+            
             # Log tenant activity
             log_tenant_activity(
                 db,
@@ -505,6 +534,9 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 action="subscription_created",
                 category="billing",
                 description=f"Subscribed to {plan.name if plan else 'Unknown'} plan with {quantity} license(s)",
+                user_email=user_email_for_log,
+                user_id=user_id_for_log,
+                ip_address=client_ip,
                 details={
                     "plan_name": plan.name if plan else None,
                     "plan_id": plan.id if plan else None,
@@ -660,12 +692,25 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             
             # Log tenant activity for cancellation
             if not was_already_canceled:
+                # Get user email for logging
+                user_email_cancel = None
+                user_id_cancel = None
+                qb_token_cancel = db.query(QuickBooksToken).filter(QuickBooksToken.realm_id == realm_id).first()
+                if qb_token_cancel:
+                    user_cancel = db.query(User).filter(User.id == qb_token_cancel.user_id).first()
+                    if user_cancel:
+                        user_email_cancel = user_cancel.email
+                        user_id_cancel = user_cancel.id
+                
                 log_tenant_activity(
                     db,
                     realm_id=realm_id,
                     action="subscription_canceled",
                     category="billing",
                     description="Subscription canceled",
+                    user_email=user_email_cancel,
+                    user_id=user_id_cancel,
+                    ip_address=client_ip,
                     details={"stripe_subscription_id": stripe_sub_id}
                 )
             
@@ -784,9 +829,22 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
     # Calculate processing time and update webhook log
     processing_time = int((time.time() - start_time) * 1000)
+    
+    # Try to find realm_id from subscription if not already set
+    discovered_realm_id = None
+    stripe_sub_id_for_lookup = data.get("subscription") or data.get("id")
+    if stripe_sub_id_for_lookup and stripe_sub_id_for_lookup.startswith("sub_"):
+        sub_for_realm = db.query(Subscription).filter(
+            Subscription.stripe_subscription_id == stripe_sub_id_for_lookup
+        ).first()
+        if sub_for_realm:
+            discovered_realm_id = sub_for_realm.realm_id
+    
     if webhook_log:
         webhook_log.status = "processed"
         webhook_log.processing_time_ms = processing_time
+        if discovered_realm_id and not webhook_log.realm_id:
+            webhook_log.realm_id = discovered_realm_id
         db.commit()
     
     log_info(
@@ -794,6 +852,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         source="stripe_webhook",
         action=event_type,
         message=f"Webhook {event_type} processed successfully in {processing_time}ms",
+        realm_id=discovered_realm_id or (webhook_log.realm_id if webhook_log else None),
         details={"event_id": event_id, "processing_time_ms": processing_time}
     )
 
