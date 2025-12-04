@@ -18,8 +18,9 @@ from db import get_db
 from models import (
     CompanyInfo, Subscription, Plan, User, QuickBooksToken,
     License, CompanyLicenseMapping, FailedPaymentLog, Submission, AdminActivityLog,
-    EmailLog, SystemLog, WebhookLog, TenantActivityLog
+    EmailLog, SystemLog, WebhookLog, TenantActivityLog, UserQuery
 )
+from pydantic import BaseModel, EmailStr
 from config import (
     ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_JWT_SECRET, ADMIN_JWT_EXPIRY_HOURS,
     STRIPE_SECRET_KEY
@@ -1900,5 +1901,263 @@ async def sync_all_subscription_quantities(
             "skipped": len(results["skipped"])
         },
         "details": results
+    }
+
+
+# ------------------------------------------------------
+# USER QUERIES (CONTACT SUPPORT)
+# ------------------------------------------------------
+
+class ContactQueryRequest(BaseModel):
+    name: str
+    email: str
+    subject: str
+    message: str
+
+
+@router.post("/contact", tags=["contact"])
+async def submit_contact_query(
+    request: Request,
+    query_data: ContactQueryRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Public endpoint - Submit a contact/support query (no authentication required)
+    """
+    try:
+        new_query = UserQuery(
+            name=query_data.name,
+            email=query_data.email,
+            subject=query_data.subject,
+            message=query_data.message,
+            status="new",
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent")
+        )
+        db.add(new_query)
+        db.commit()
+        db.refresh(new_query)
+        
+        return {
+            "success": True,
+            "message": "Your query has been submitted successfully. We'll get back to you within 24 hours.",
+            "query_id": new_query.id
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to submit query: {str(e)}")
+
+
+@router.get("/user-queries", tags=["admin"])
+async def get_user_queries(
+    request: Request,
+    status: Optional[str] = None,
+    subject: Optional[str] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token)
+):
+    """
+    Admin endpoint - Get all user queries with filtering and pagination
+    """
+    log_admin_activity(db, admin.get("sub"), "view_user_queries", request=request)
+    
+    query = db.query(UserQuery)
+    
+    # Apply filters
+    if status:
+        query = query.filter(UserQuery.status == status)
+    if subject:
+        query = query.filter(UserQuery.subject == subject)
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            (UserQuery.name.ilike(search_term)) |
+            (UserQuery.email.ilike(search_term)) |
+            (UserQuery.message.ilike(search_term))
+        )
+    
+    # Get total count
+    total = query.count()
+    
+    # Apply pagination
+    offset = (page - 1) * limit
+    queries = query.order_by(desc(UserQuery.created_at)).offset(offset).limit(limit).all()
+    
+    return {
+        "queries": [
+            {
+                "id": q.id,
+                "name": q.name,
+                "email": q.email,
+                "subject": q.subject,
+                "message": q.message,
+                "status": q.status,
+                "admin_notes": q.admin_notes,
+                "responded_at": q.responded_at.isoformat() if q.responded_at else None,
+                "responded_by": q.responded_by,
+                "ip_address": q.ip_address,
+                "created_at": q.created_at.isoformat() if q.created_at else None,
+                "updated_at": q.updated_at.isoformat() if q.updated_at else None,
+            }
+            for q in queries
+        ],
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "total_pages": (total + limit - 1) // limit
+        }
+    }
+
+
+@router.get("/user-queries/{query_id}", tags=["admin"])
+async def get_user_query_detail(
+    query_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token)
+):
+    """
+    Admin endpoint - Get a single user query by ID
+    """
+    user_query = db.query(UserQuery).filter(UserQuery.id == query_id).first()
+    
+    if not user_query:
+        raise HTTPException(status_code=404, detail="Query not found")
+    
+    log_admin_activity(
+        db, admin.get("sub"), "view_user_query_detail",
+        resource_type="user_query", resource_id=str(query_id),
+        request=request
+    )
+    
+    return {
+        "id": user_query.id,
+        "name": user_query.name,
+        "email": user_query.email,
+        "subject": user_query.subject,
+        "message": user_query.message,
+        "status": user_query.status,
+        "admin_notes": user_query.admin_notes,
+        "responded_at": user_query.responded_at.isoformat() if user_query.responded_at else None,
+        "responded_by": user_query.responded_by,
+        "ip_address": user_query.ip_address,
+        "user_agent": user_query.user_agent,
+        "created_at": user_query.created_at.isoformat() if user_query.created_at else None,
+        "updated_at": user_query.updated_at.isoformat() if user_query.updated_at else None,
+    }
+
+
+class UpdateQueryRequest(BaseModel):
+    status: Optional[str] = None
+    admin_notes: Optional[str] = None
+
+
+@router.put("/user-queries/{query_id}", tags=["admin"])
+async def update_user_query(
+    query_id: int,
+    update_data: UpdateQueryRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token)
+):
+    """
+    Admin endpoint - Update a user query (status, admin notes)
+    """
+    user_query = db.query(UserQuery).filter(UserQuery.id == query_id).first()
+    
+    if not user_query:
+        raise HTTPException(status_code=404, detail="Query not found")
+    
+    if update_data.status:
+        user_query.status = update_data.status
+        if update_data.status in ["resolved", "closed"]:
+            user_query.responded_at = datetime.utcnow()
+            user_query.responded_by = admin.get("sub")
+    
+    if update_data.admin_notes is not None:
+        user_query.admin_notes = update_data.admin_notes
+    
+    user_query.updated_at = datetime.utcnow()
+    db.commit()
+    
+    log_admin_activity(
+        db, admin.get("sub"), "update_user_query",
+        resource_type="user_query", resource_id=str(query_id),
+        details={"new_status": update_data.status, "has_notes": bool(update_data.admin_notes)},
+        request=request
+    )
+    
+    return {
+        "success": True,
+        "message": "Query updated successfully",
+        "query": {
+            "id": user_query.id,
+            "status": user_query.status,
+            "admin_notes": user_query.admin_notes,
+            "updated_at": user_query.updated_at.isoformat()
+        }
+    }
+
+
+@router.delete("/user-queries/{query_id}", tags=["admin"])
+async def delete_user_query(
+    query_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token)
+):
+    """
+    Admin endpoint - Delete a user query
+    """
+    user_query = db.query(UserQuery).filter(UserQuery.id == query_id).first()
+    
+    if not user_query:
+        raise HTTPException(status_code=404, detail="Query not found")
+    
+    db.delete(user_query)
+    db.commit()
+    
+    log_admin_activity(
+        db, admin.get("sub"), "delete_user_query",
+        resource_type="user_query", resource_id=str(query_id),
+        request=request
+    )
+    
+    return {"success": True, "message": "Query deleted successfully"}
+
+
+@router.get("/user-queries-stats", tags=["admin"])
+async def get_user_queries_stats(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: dict = Depends(verify_admin_token)
+):
+    """
+    Admin endpoint - Get statistics for user queries
+    """
+    total = db.query(func.count(UserQuery.id)).scalar()
+    new_count = db.query(func.count(UserQuery.id)).filter(UserQuery.status == "new").scalar()
+    in_progress_count = db.query(func.count(UserQuery.id)).filter(UserQuery.status == "in_progress").scalar()
+    resolved_count = db.query(func.count(UserQuery.id)).filter(UserQuery.status == "resolved").scalar()
+    
+    # Get subject distribution
+    subject_stats = db.query(
+        UserQuery.subject,
+        func.count(UserQuery.id)
+    ).group_by(UserQuery.subject).all()
+    
+    return {
+        "total": total,
+        "by_status": {
+            "new": new_count,
+            "in_progress": in_progress_count,
+            "resolved": resolved_count,
+            "closed": total - new_count - in_progress_count - resolved_count
+        },
+        "by_subject": {s[0]: s[1] for s in subject_stats}
     }
 

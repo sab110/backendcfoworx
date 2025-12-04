@@ -423,3 +423,27 @@ class TenantActivityLog(Base):
 
     def __repr__(self):
         return f"<TenantActivityLog(id={self.id}, realm_id='{self.realm_id}', action='{self.action}')>"
+
+
+# ------------------------------------------------------
+# USER QUERY MODEL (Contact Support)
+# ------------------------------------------------------
+class UserQuery(Base):
+    __tablename__ = "user_queries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=False, index=True)
+    subject = Column(String(100), nullable=False, index=True)  # "general", "support", "billing", "partnership", "feedback"
+    message = Column(Text, nullable=False)
+    status = Column(String(50), default="new", index=True)  # "new", "in_progress", "resolved", "closed"
+    admin_notes = Column(Text, nullable=True)
+    responded_at = Column(DateTime, nullable=True)
+    responded_by = Column(String(100), nullable=True)  # Admin username who responded
+    ip_address = Column(String(50), nullable=True)
+    user_agent = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<UserQuery(id={self.id}, email='{self.email}', subject='{self.subject}', status='{self.status}')>"
