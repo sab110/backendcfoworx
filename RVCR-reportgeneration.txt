@@ -1,0 +1,39 @@
+YTD api call
+GET /v3/company/123146237901159/reports/ClassSales?accounting_method=Cash&start_date=2025-01-01&end_date=2025-10-31&summarize_column_by=Classes&department=10&class=900000000000529714,900000000000529715,900000000000529716,900000000000529713,900000000000529712,900000000000529711&minorversion=75
+
+Accept type:application/json
+Production Base URL:https://quickbooks.api.intuit.com
+Sandbox Base URL:https://sandbox-quickbooks.api.intuit.com
+Accept type:application/json
+Production Base URL:https://quickbooks.api.intuit.com
+Sandbox Base URL:https://sandbox-quickbooks.api.intuit.com
+
+
+Last Month api call
+
+GET /v3/company/123146237901159/reports/ClassSales?summarize_column_by=Classes&accounting_method=Cash&department=10&date_macro=Last Month&class=900000000000529714,900000000000529715,900000000000529716,900000000000529713,900000000000529712,900000000000529711&minorversion=75
+
+
+
+Classes ID are dynamic and can be extracted from below api
+
+GET /v3/company/123146237901159/query?query=SELECT IdFROM Class
+WHERE Name IN ('1 - WATER', '2 - FIRE', '3 - 
+MOLD/BIO HAZARD', '4 - OTHER', '5 - SUBCONTRACT', '6 
+- RECONSTRUCTION')&minorversion=75
+
+Content type:text/plain
+Production Base URL:https://quickbooks.api.intuit.com
+Sandbox Base URL:https://sandbox-quickbooks.api.intuit.com
+
+DEPARTMENT IDS are dynamic and can be extracted from database present in the column QBO_Department_id
+SELECT * FROM public.company_license_mappings
+
+/reports/ClassSales api will be called twice
+One for year till date in which pass parameters
+start_date => Start of the year
+end_date => end date of the Last Month
+
+Second will be for the Last month in which 
+start_date and end_date won't be passed but
+date_macro with value Last Month be passed

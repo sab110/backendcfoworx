@@ -627,6 +627,48 @@ async def get_selected_licenses(realm_id: str, db: Session = Depends(get_db)):
 
 
 # ------------------------------------------------------
+# GET MAPPINGS FOR RVCR
+# ------------------------------------------------------
+@router.get("/mappings/{realm_id}")
+async def get_license_mappings(realm_id: str, db: Session = Depends(get_db)):
+    """
+    Get all license mappings for a company (for RVCR report generation).
+    Returns simplified mapping data with department_id and franchise_number.
+    """
+    # Verify company exists
+    company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
+    if not company:
+        raise HTTPException(
+            status_code=404,
+            detail="Company not found. Please fetch company info first."
+        )
+    
+    # Get all active mappings for this company
+    mappings = db.query(CompanyLicenseMapping).filter_by(
+        realm_id=realm_id,
+        is_active="true"
+    ).all()
+    
+    # Build response
+    mappings_data = []
+    for mapping in mappings:
+        mappings_data.append({
+            "id": mapping.id,
+            "realm_id": mapping.realm_id,
+            "franchise_number": mapping.franchise_number,
+            "qbo_department_id": mapping.qbo_department_id,
+            "qbo_department_name": mapping.qbo_department_name,
+            "is_active": mapping.is_active,
+        })
+    
+    return {
+        "status": "success",
+        "realm_id": realm_id,
+        "mappings": mappings_data
+    }
+
+
+# ------------------------------------------------------
 # COMPANY LICENSE MAPPING ENDPOINTS
 # ------------------------------------------------------
 

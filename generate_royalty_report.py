@@ -921,14 +921,14 @@ def main():
     generator = RoyaltyReportGenerator()
     
     # Define file paths
-    last_month_file = "Department/SERVPRO Team Marchese/id1rvcr.json"
-    ytd_file = "Department/SERVPRO Team Marchese/id1rvcrytd.json"
-    output_file = "Department/Generated_RVCR_Sooland_10516.xlsx"
+    last_month_file = "Department/SERVPRO Team Marchese/id7rvcr.json"  # Result from Last Month api call
+    ytd_file = "Department/SERVPRO Team Marchese/id7rvcrytd.json"  # Result from YTD api call
+    output_file = "Department/Generated_RVCR_Sarpy County_11533.xlsx"
     
     # Report configuration
-    report_title = "RVCR - Sooland 10516"
-    department_name = "Sooland 10516"
-    main_group_name = "SERVPRO of Sooland, Lincoln, Sarpy County, Kearney & North Platte, Grand Island & Hastings"
+    report_title = "RVCR - Sarpy County 11533" # QBO Department Name
+    department_name = "Sarpy County 11533" # QBO Department Name
+    main_group_name = "SERVPRO of Sooland, Lincoln, Sarpy County, Kearney & North Platte, Grand Island & Hastings" # QBO Company Name
     
     # Generate report with PDF
     try:
