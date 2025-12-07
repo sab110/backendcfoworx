@@ -338,13 +338,19 @@ async def generate_rvcr_report(
         period_end = lm_header.get("EndPeriod", "")
         report_basis = lm_header.get("ReportBasis", "Cash")
         
-        print(f"📅 Last Month period: {period_start} to {period_end}")
-        
+        # Fallback: If QuickBooks doesn't return period info, calculate it from current date
+        # Since we're using date_macro="Last Month", we know it's the previous month
         if not period_end:
-            raise HTTPException(
-                status_code=500,
-                detail="Could not determine report period from Last Month data"
-            )
+            now = datetime.utcnow()
+            # Get last month
+            last_month = now - relativedelta(months=1)
+            # First day of last month
+            period_start = datetime(last_month.year, last_month.month, 1).strftime("%Y-%m-%d")
+            # Last day of last month
+            period_end = (datetime(last_month.year, last_month.month, 1) + relativedelta(months=1) - timedelta(days=1)).strftime("%Y-%m-%d")
+            print(f"📅 Last Month period (calculated fallback): {period_start} to {period_end}")
+        else:
+            print(f"📅 Last Month period: {period_start} to {period_end}")
         
         # 8. Fetch YTD report using dates derived from Last Month's period
         # YTD = Jan 1 of that year to the end of Last Month
