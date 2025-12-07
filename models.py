@@ -447,3 +447,47 @@ class UserQuery(Base):
 
     def __repr__(self):
         return f"<UserQuery(id={self.id}, email='{self.email}', subject='{self.subject}', status='{self.status}')>"
+
+
+# ------------------------------------------------------
+# GENERATED REPORT MODEL (RVCR, ILRM, etc.)
+# ------------------------------------------------------
+class GeneratedReport(Base):
+    __tablename__ = "generated_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    realm_id = Column(String, ForeignKey("company_info.realm_id", ondelete="CASCADE"), nullable=False, index=True)
+    franchise_number = Column(String(50), nullable=False, index=True)
+    
+    # Report details
+    report_type = Column(String(50), nullable=False, index=True)  # "RVCR", "ILRM", "PaymentSummary"
+    report_name = Column(String(255), nullable=False)  # e.g., "01444 - 082024 RVCR"
+    report_title = Column(String(255), nullable=True)  # Display title
+    
+    # Period information
+    period_start = Column(String(20), nullable=True)  # e.g., "2025-10-01"
+    period_end = Column(String(20), nullable=True)  # e.g., "2025-10-31"
+    period_month = Column(String(10), nullable=True)  # e.g., "102025" (mmyyyy)
+    
+    # Azure Storage references
+    excel_blob_name = Column(String(500), nullable=True)
+    excel_blob_url = Column(String(1000), nullable=True)
+    pdf_blob_name = Column(String(500), nullable=True)
+    pdf_blob_url = Column(String(1000), nullable=True)
+    
+    # QuickBooks metadata
+    qbo_department_id = Column(String(50), nullable=True)
+    qbo_department_name = Column(String(255), nullable=True)
+    report_basis = Column(String(20), default="Cash")  # "Cash" or "Accrual"
+    
+    # Status
+    status = Column(String(50), default="generated")  # "generated", "sent", "failed"
+    error_message = Column(Text, nullable=True)
+    
+    # Timestamps
+    generated_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<GeneratedReport(id={self.id}, realm_id='{self.realm_id}', report_name='{self.report_name}')>"
