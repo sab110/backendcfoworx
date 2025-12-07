@@ -668,7 +668,7 @@ async def generate_payment_summary(
         mapping = db.query(CompanyLicenseMapping).filter(
             CompanyLicenseMapping.realm_id == realm_id,
             CompanyLicenseMapping.qbo_department_id == department_id,
-            CompanyLicenseMapping.is_active == True
+            CompanyLicenseMapping.is_active == "true"
         ).first()
         
         if not mapping:
@@ -843,7 +843,7 @@ async def generate_all_payment_summaries(
     # Get all active license mappings for this company
     mappings = db.query(CompanyLicenseMapping).filter(
         CompanyLicenseMapping.realm_id == realm_id,
-        CompanyLicenseMapping.is_active == True
+        CompanyLicenseMapping.is_active == "true"
     ).all()
     
     if not mappings:
