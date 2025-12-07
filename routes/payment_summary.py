@@ -23,11 +23,11 @@ from models import (
     GeneratedReport
 )
 from services.azure_storage_service import AzureStorageService
-from routes.quickbooks_auth import refresh_qbo_token
 from routes.rvcr_reports import (
     fetch_class_sales_report,
     query_class_ids,
-    get_qbo_base_url
+    get_qbo_base_url,
+    refresh_token_if_expired
 )
 
 import openpyxl
@@ -657,7 +657,7 @@ async def generate_payment_summary(
             raise HTTPException(status_code=404, detail=f"No QuickBooks token found for realm_id: {realm_id}")
         
         # 2. Refresh token if needed
-        access_token = refresh_qbo_token(token_record, db)
+        access_token = refresh_token_if_expired(token_record, db)
         
         # 3. Get company info
         company_info = db.query(CompanyInfo).filter(
