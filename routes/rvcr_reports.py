@@ -38,12 +38,14 @@ storage = AzureStorageService(container_name="reports")
 # Request Models
 # ------------------------------------------------------
 class RVCRGenerateRequest(BaseModel):
-    """Request model for RVCR generation"""
+    """Request model for RVCR generation
+    
+    Note: Reports are always generated for "Last Month" as per business requirements.
+    The date_macro="Last Month" is used for the last month API call, and the YTD call
+    uses dynamic dates derived from the Last Month report's actual period.
+    """
     realm_id: str
     department_id: str
-    # Optional: specify custom date range (defaults to last month)
-    period_year: Optional[int] = None
-    period_month: Optional[int] = None  # 1-12
 
 
 # ------------------------------------------------------
@@ -153,8 +155,7 @@ def fetch_class_sales_report(
     department_id: str,
     class_ids: list,
     report_type: str,  # "last_month" or "ytd"
-    period_year: int = None,
-    period_month: int = None
+    last_month_end_date: str = None  # For YTD: the EndPeriod from Last Month report (YYYY-MM-DD)
 ) -> dict:
     """
     Fetch ClassSales report from QuickBooks API
@@ -165,8 +166,8 @@ def fetch_class_sales_report(
         department_id: QuickBooks department ID
         class_ids: List of class IDs to include
         report_type: "last_month" or "ytd"
-        period_year: Year for the report (optional)
-        period_month: Month for the report (optional)
+        last_month_end_date: For YTD report - the end date from the Last Month report (YYYY-MM-DD format)
+                            Used to calculate YTD range: Jan 1 of that year to this date
     """
     base_url = get_qbo_base_url()
     url = f"{base_url}/v3/company/{realm_id}/reports/ClassSales"
@@ -192,21 +193,17 @@ def fetch_class_sales_report(
         params["class"] = class_param
     
     if report_type == "last_month":
-        # Use date_macro for Last Month
+        # Always use date_macro for Last Month - this ensures QuickBooks determines the actual period
         params["date_macro"] = "Last Month"
     else:  # ytd
-        # Calculate YTD dates
-        if period_year and period_month:
-            # Use specified period
-            end_date = datetime(period_year, period_month, 1) + relativedelta(months=1) - timedelta(days=1)
-            start_date = datetime(period_year, 1, 1)
-        else:
-            # Default to current year up to last month
-            now = datetime.utcnow()
-            # Get last month's end date
-            last_month = now - relativedelta(months=1)
-            end_date = datetime(last_month.year, last_month.month, 1) + relativedelta(months=1) - timedelta(days=1)
-            start_date = datetime(end_date.year, 1, 1)
+        # YTD dates are derived from the Last Month report's actual period
+        # This ensures YTD aligns with the Last Month being reported
+        if not last_month_end_date:
+            raise ValueError("last_month_end_date is required for YTD report")
+        
+        # Parse the end date to determine the year
+        end_date = datetime.strptime(last_month_end_date, "%Y-%m-%d")
+        start_date = datetime(end_date.year, 1, 1)  # Jan 1 of the same year
         
         params["start_date"] = start_date.strftime("%Y-%m-%d")
         params["end_date"] = end_date.strftime("%Y-%m-%d")
@@ -325,32 +322,40 @@ async def generate_rvcr_report(
         # 5. Query class IDs from QuickBooks
         class_ids = query_class_ids(realm_id, access_token)
         
-        # 6. Fetch Last Month and YTD reports from QuickBooks
+        # 6. Fetch Last Month report FIRST (uses date_macro="Last Month")
+        # This determines the actual period from QuickBooks
         last_month_data = fetch_class_sales_report(
             realm_id=realm_id,
             access_token=access_token,
             department_id=department_id,
             class_ids=class_ids,
-            report_type="last_month",
-            period_year=request.period_year,
-            period_month=request.period_month
+            report_type="last_month"
         )
         
+        # 7. Extract the actual period from the Last Month report header
+        lm_header = last_month_data.get("Header", {})
+        period_start = lm_header.get("StartPeriod", "")
+        period_end = lm_header.get("EndPeriod", "")
+        report_basis = lm_header.get("ReportBasis", "Cash")
+        
+        print(f"📅 Last Month period: {period_start} to {period_end}")
+        
+        if not period_end:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not determine report period from Last Month data"
+            )
+        
+        # 8. Fetch YTD report using dates derived from Last Month's period
+        # YTD = Jan 1 of that year to the end of Last Month
         ytd_data = fetch_class_sales_report(
             realm_id=realm_id,
             access_token=access_token,
             department_id=department_id,
             class_ids=class_ids,
             report_type="ytd",
-            period_year=request.period_year,
-            period_month=request.period_month
+            last_month_end_date=period_end  # Pass the actual end date for YTD calculation
         )
-        
-        # 7. Get period info from the reports
-        lm_header = last_month_data.get("Header", {})
-        period_start = lm_header.get("StartPeriod", "")
-        period_end = lm_header.get("EndPeriod", "")
-        report_basis = lm_header.get("ReportBasis", "Cash")
         
         # Generate report name: Franchise # - mmyyyy RVCR
         report_name = generate_report_name(franchise_number, period_end)
@@ -404,19 +409,19 @@ async def generate_rvcr_report(
             pdf_available = False
         
         # 10. Upload to Azure Storage
-        # Convention: {client_id}/{license_id}/{year-month}_{reportType}_{uuid}.{ext}
-        # client_id = realm_id, license_id = franchise_number
+        # Convention: {client_id}/{franchise_number}/{report_name}.{ext}
+        # Example: 9130347220447566/09229/09229 - 112024 RVCR.xlsx
         
         # Read Excel file
         with open(excel_path, 'rb') as f:
             excel_bytes = f.read()
         
-        # Upload Excel
+        # Upload Excel with proper naming: Franchise # - mmyyyy RVCR
         excel_blob_url, excel_blob_name = storage.upload_file(
             file_data=excel_bytes,
             client_id=realm_id,
             license_id=franchise_number,
-            report_type="RVCR",
+            file_name=report_name,  # e.g., "01444 - 082024 RVCR"
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             ext="xlsx"
         )
@@ -429,11 +434,12 @@ async def generate_rvcr_report(
             with open(pdf_path, 'rb') as f:
                 pdf_bytes = f.read()
             
+            # Upload PDF with same naming convention
             pdf_blob_url, pdf_blob_name = storage.upload_file(
                 file_data=pdf_bytes,
                 client_id=realm_id,
                 license_id=franchise_number,
-                report_type="RVCR",
+                file_name=report_name,  # e.g., "01444 - 082024 RVCR"
                 content_type="application/pdf",
                 ext="pdf"
             )
@@ -486,8 +492,8 @@ async def generate_rvcr_report(
             print(f"⚠️ Cleanup warning: {cleanup_error}")
         
         # 14. Generate SAS URLs for immediate download
-        excel_sas_url = storage.generate_sas_url(excel_blob_name, expiry_minutes=60)
-        pdf_sas_url = storage.generate_sas_url(pdf_blob_name, expiry_minutes=60) if pdf_blob_name else None
+        excel_sas_url = storage.generate_sas_url(excel_blob_name)  # Default 10 years expiry
+        pdf_sas_url = storage.generate_sas_url(pdf_blob_name) if pdf_blob_name else None
         
         # Build response message
         if pdf_available:
@@ -565,10 +571,10 @@ async def get_rvcr_report(
     pdf_sas_url = None
     
     if report.excel_blob_name:
-        excel_sas_url = storage.generate_sas_url(report.excel_blob_name, expiry_minutes=60)
+        excel_sas_url = storage.generate_sas_url(report.excel_blob_name)  # Default 10 years expiry
     
     if report.pdf_blob_name:
-        pdf_sas_url = storage.generate_sas_url(report.pdf_blob_name, expiry_minutes=60)
+        pdf_sas_url = storage.generate_sas_url(report.pdf_blob_name)  # Default 10 years expiry
     
     return {
         "id": report.id,
@@ -639,13 +645,13 @@ async def list_rvcr_reports(
         
         if report.excel_blob_name:
             try:
-                excel_sas_url = storage.generate_sas_url(report.excel_blob_name, expiry_minutes=60)
+                excel_sas_url = storage.generate_sas_url(report.excel_blob_name)  # Default 10 years expiry
             except:
                 pass
         
         if report.pdf_blob_name:
             try:
-                pdf_sas_url = storage.generate_sas_url(report.pdf_blob_name, expiry_minutes=60)
+                pdf_sas_url = storage.generate_sas_url(report.pdf_blob_name)  # Default 10 years expiry
             except:
                 pass
         
@@ -677,14 +683,13 @@ async def list_rvcr_reports(
 @router.post("/generate-all/{realm_id}")
 async def generate_all_rvcr_reports(
     realm_id: str,
-    period_year: Optional[int] = None,
-    period_month: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
     """
     Generate RVCR reports for all franchises/departments in a realm
     
     This is useful for generating monthly reports for all locations at once.
+    Reports are always generated for "Last Month" as determined by QuickBooks.
     """
     # Get all active license mappings for this realm
     mappings = db.query(CompanyLicenseMapping).filter_by(
@@ -703,12 +708,10 @@ async def generate_all_rvcr_reports(
     
     for mapping in mappings:
         try:
-            # Create request for each department
+            # Create request for each department (always generates for Last Month)
             request = RVCRGenerateRequest(
                 realm_id=realm_id,
-                department_id=mapping.qbo_department_id,
-                period_year=period_year,
-                period_month=period_month
+                department_id=mapping.qbo_department_id
             )
             
             # Generate report
