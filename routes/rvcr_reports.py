@@ -373,9 +373,12 @@ async def generate_rvcr_report(
         excel_output = os.path.join(temp_dir, f"{report_name}.xlsx")
         
         generator = RoyaltyReportGenerator()
+        pdf_path = None
+        pdf_available = False
         
+        # 9a. Generate Excel report first (always succeeds)
         try:
-            excel_path, pdf_path = generator.generate_report_with_pdf(
+            excel_path = generator.generate_report(
                 last_month_file=last_month_file,
                 ytd_file=ytd_file,
                 output_file=excel_output,
@@ -383,13 +386,22 @@ async def generate_rvcr_report(
                 department_name=department_name,
                 main_group_name=main_group_name
             )
-            print(f"✅ Reports generated: Excel={excel_path}, PDF={pdf_path}")
+            print(f"✅ Excel report generated: {excel_path}")
         except Exception as gen_error:
-            print(f"❌ Report generation error: {str(gen_error)}")
+            print(f"❌ Excel generation error: {str(gen_error)}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Report generation failed: {str(gen_error)}"
             )
+        
+        # 9b. Try PDF conversion (optional - may fail in serverless environments)
+        try:
+            pdf_path = generator.convert_to_pdf(excel_path)
+            pdf_available = True
+            print(f"✅ PDF report generated: {pdf_path}")
+        except Exception as pdf_error:
+            print(f"⚠️ PDF conversion skipped (not available in this environment): {str(pdf_error)}")
+            pdf_available = False
         
         # 10. Upload to Azure Storage
         # Convention: {client_id}/{license_id}/{year-month}_{reportType}_{uuid}.{ext}
@@ -398,10 +410,6 @@ async def generate_rvcr_report(
         # Read Excel file
         with open(excel_path, 'rb') as f:
             excel_bytes = f.read()
-        
-        # Read PDF file
-        with open(pdf_path, 'rb') as f:
-            pdf_bytes = f.read()
         
         # Upload Excel
         excel_blob_url, excel_blob_name = storage.upload_file(
@@ -414,16 +422,24 @@ async def generate_rvcr_report(
         )
         print(f"☁️ Excel uploaded: {excel_blob_name}")
         
-        # Upload PDF
-        pdf_blob_url, pdf_blob_name = storage.upload_file(
-            file_data=pdf_bytes,
-            client_id=realm_id,
-            license_id=franchise_number,
-            report_type="RVCR",
-            content_type="application/pdf",
-            ext="pdf"
-        )
-        print(f"☁️ PDF uploaded: {pdf_blob_name}")
+        # Upload PDF only if available
+        pdf_blob_url = None
+        pdf_blob_name = None
+        if pdf_available and pdf_path:
+            with open(pdf_path, 'rb') as f:
+                pdf_bytes = f.read()
+            
+            pdf_blob_url, pdf_blob_name = storage.upload_file(
+                file_data=pdf_bytes,
+                client_id=realm_id,
+                license_id=franchise_number,
+                report_type="RVCR",
+                content_type="application/pdf",
+                ext="pdf"
+            )
+            print(f"☁️ PDF uploaded: {pdf_blob_name}")
+        else:
+            print(f"ℹ️ PDF upload skipped (not available)")
         
         # 11. Get period_month in mmyyyy format
         try:
@@ -463,18 +479,26 @@ async def generate_rvcr_report(
             os.remove(last_month_file)
             os.remove(ytd_file)
             os.remove(excel_path)
-            os.remove(pdf_path)
+            if pdf_path and os.path.exists(pdf_path):
+                os.remove(pdf_path)
             os.rmdir(temp_dir)
         except Exception as cleanup_error:
             print(f"⚠️ Cleanup warning: {cleanup_error}")
         
         # 14. Generate SAS URLs for immediate download
         excel_sas_url = storage.generate_sas_url(excel_blob_name, expiry_minutes=60)
-        pdf_sas_url = storage.generate_sas_url(pdf_blob_name, expiry_minutes=60)
+        pdf_sas_url = storage.generate_sas_url(pdf_blob_name, expiry_minutes=60) if pdf_blob_name else None
+        
+        # Build response message
+        if pdf_available:
+            message = f"RVCR report generated successfully for {department_name}"
+        else:
+            message = f"RVCR Excel report generated for {department_name} (PDF not available in serverless environment)"
         
         return {
             "status": "success",
-            "message": f"RVCR report generated successfully for {department_name}",
+            "message": message,
+            "pdf_available": pdf_available,
             "report": {
                 "id": generated_report.id,
                 "report_name": report_name,
@@ -497,7 +521,7 @@ async def generate_rvcr_report(
                     "blob_name": pdf_blob_name,
                     "blob_url": pdf_blob_url,
                     "download_url": pdf_sas_url
-                }
+                } if pdf_available else None
             }
         }
         
