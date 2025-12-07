@@ -9,6 +9,7 @@ from routes.licenses import router as licenses_router
 from routes.admin import router as admin_router
 from routes.email_preferences import router as email_preferences_router
 from routes.rvcr_reports import router as rvcr_router
+from routes.payment_summary import router as payment_summary_router
 from db import engine, Base
 
 
@@ -42,6 +43,7 @@ app.include_router(licenses_router, prefix="/api/licenses", tags=["Licenses"])
 app.include_router(admin_router, prefix="/api/admin", tags=["Admin"])
 app.include_router(email_preferences_router, prefix="/api/email-preferences", tags=["Email Preferences"])
 app.include_router(rvcr_router, prefix="/api/rvcr", tags=["RVCR Reports"])
+app.include_router(payment_summary_router, prefix="/api/payment-summary", tags=["Payment Summary"])
 
 @app.get("/")
 def root():
