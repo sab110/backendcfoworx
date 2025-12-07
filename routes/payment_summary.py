@@ -201,7 +201,9 @@ def extract_category_totals(rvcr_data: dict) -> dict:
     }
     
     # Category mapping from RVCR column titles
+    # Supports both "Total Commercial - Water" and just "Commercial - Water" formats
     category_map = {
+        # Total formats (most common)
         "Total Commercial - Water": ("water", "commercial"),
         "Total Residential - Water": ("water", "residential"),
         "Total Commercial - Fire": ("fire", "commercial"),
@@ -214,11 +216,20 @@ def extract_category_totals(rvcr_data: dict) -> dict:
         "Total Residential - Subcontract": ("subcontract", "residential"),
         "Total Commercial - Reconstruction": ("reconstruction", "commercial"),
         "Total Residential - Reconstruction": ("reconstruction", "residential"),
+        # Main category totals (fallback for simpler reports)
+        "Total 1 - WATER": ("water", "total"),
+        "Total 2 - FIRE": ("fire", "total"),
+        "Total 3 - MOLD/BIO HAZARD": ("mold_bio", "total"),
+        "Total 4 - OTHER": ("other", "total"),
+        "Total 5 - SUBCONTRACT": ("subcontract", "total"),
+        "Total 6 - RECONSTRUCTION": ("reconstruction", "total"),
     }
     
     # Get column definitions
     columns = rvcr_data.get("Columns", {}).get("Column", [])
     col_titles = [col.get("ColTitle", "") for col in columns]
+    
+    print(f"📊 Found {len(col_titles)} columns in RVCR data")
     
     # Find TOTAL row
     rows = rvcr_data.get("Rows", {}).get("Row", [])
@@ -233,6 +244,11 @@ def extract_category_totals(rvcr_data: dict) -> dict:
         print("⚠️ Could not find TOTAL row in RVCR data")
         return results
     
+    print(f"📊 Found TOTAL row with {len(total_row)} values")
+    
+    # Track categories found for simpler fallback handling
+    categories_found = set()
+    
     # Extract values for each category
     for i, col_title in enumerate(col_titles):
         if col_title in category_map:
@@ -241,9 +257,26 @@ def extract_category_totals(rvcr_data: dict) -> dict:
                 value_str = total_row[i].get("value", "0")
                 try:
                     value = float(value_str) if value_str else 0
-                    results[category][type_key] = value
+                    
+                    if type_key == "total":
+                        # Main category total - only use if we don't have commercial/residential breakdown
+                        if f"{category}_commercial" not in categories_found and f"{category}_residential" not in categories_found:
+                            # Split evenly (can be improved based on business logic)
+                            results[category]["residential"] = value
+                    else:
+                        results[category][type_key] = value
+                        categories_found.add(f"{category}_{type_key}")
+                    
+                    print(f"  ✓ {col_title} (idx {i}): {value:.2f}")
                 except ValueError:
-                    results[category][type_key] = 0
+                    print(f"  ⚠️ Could not parse value for {col_title}: {value_str}")
+    
+    # Log extracted totals
+    print("📊 Extracted category totals:")
+    for cat_name, cat_data in results.items():
+        total = cat_data["commercial"] + cat_data["residential"]
+        if total > 0:
+            print(f"  {cat_name}: Commercial=${cat_data['commercial']:.2f}, Residential=${cat_data['residential']:.2f}, Total=${total:.2f}")
     
     return results
 
@@ -781,19 +814,26 @@ async def generate_payment_summary(
         pdf_sas_url = storage.generate_sas_url(pdf_blob_name, expiry_years=10) if pdf_blob_name else None
         
         # 15. Save to database
+        # Format period_month as "mmyyyy" string (matching RVCR format)
+        period_month_str = f"{period_month:02d}{period_year}"
+        
         report_record = GeneratedReport(
-            id=str(uuid.uuid4()),
             realm_id=realm_id,
             franchise_number=franchise_number,
             report_type="payment_summary",
-            period_year=period_year,
-            period_month=period_month,
+            report_name=report_name,
+            report_title=f"Payment Summary - {franchise_number}",
+            period_start=period_start,
+            period_end=period_end,
+            period_month=period_month_str,
             excel_blob_url=excel_blob_url,
             excel_blob_name=excel_blob_name,
             pdf_blob_url=pdf_blob_url,
             pdf_blob_name=pdf_blob_name,
-            generated_at=datetime.utcnow(),
-            generated_by="system"
+            qbo_department_id=department_id,
+            qbo_department_name=department_name,
+            report_basis="Cash",
+            status="generated"
         )
         db.add(report_record)
         db.commit()
@@ -907,11 +947,20 @@ async def list_payment_summaries(
         excel_url = storage.generate_sas_url(report.excel_blob_name, expiry_years=10) if report.excel_blob_name else None
         pdf_url = storage.generate_sas_url(report.pdf_blob_name, expiry_years=10) if report.pdf_blob_name else None
         
+        # Parse period_month (mmyyyy format) for display
+        pm = report.period_month or ""
+        display_month = pm[:2] if len(pm) >= 2 else ""
+        display_year = pm[2:] if len(pm) >= 4 else ""
+        
         result.append({
             "id": report.id,
             "franchise_number": report.franchise_number,
-            "period_year": report.period_year,
-            "period_month": report.period_month,
+            "report_name": report.report_name,
+            "period_month": display_month,
+            "period_year": display_year,
+            "period_start": report.period_start,
+            "period_end": report.period_end,
+            "department_name": report.qbo_department_name,
             "generated_at": report.generated_at.isoformat() if report.generated_at else None,
             "excel_download_url": excel_url,
             "pdf_download_url": pdf_url,
@@ -945,12 +994,21 @@ async def get_payment_summary(
     excel_url = storage.generate_sas_url(report.excel_blob_name, expiry_years=10) if report.excel_blob_name else None
     pdf_url = storage.generate_sas_url(report.pdf_blob_name, expiry_years=10) if report.pdf_blob_name else None
     
+    # Parse period_month (mmyyyy format) for display
+    pm = report.period_month or ""
+    display_month = pm[:2] if len(pm) >= 2 else ""
+    display_year = pm[2:] if len(pm) >= 4 else ""
+    
     return {
         "id": report.id,
         "realm_id": report.realm_id,
         "franchise_number": report.franchise_number,
-        "period_year": report.period_year,
-        "period_month": report.period_month,
+        "report_name": report.report_name,
+        "period_month": display_month,
+        "period_year": display_year,
+        "period_start": report.period_start,
+        "period_end": report.period_end,
+        "department_name": report.qbo_department_name,
         "generated_at": report.generated_at.isoformat() if report.generated_at else None,
         "excel_download_url": excel_url,
         "pdf_download_url": pdf_url,
