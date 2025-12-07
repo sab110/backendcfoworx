@@ -155,7 +155,6 @@ def fetch_class_sales_report(
     department_id: str,
     class_ids: list,
     report_type: str,  # "last_month" or "ytd"
-    last_month_end_date: str = None  # For YTD: the EndPeriod from Last Month report (YYYY-MM-DD)
 ) -> dict:
     """
     Fetch ClassSales report from QuickBooks API
@@ -166,8 +165,10 @@ def fetch_class_sales_report(
         department_id: QuickBooks department ID
         class_ids: List of class IDs to include
         report_type: "last_month" or "ytd"
-        last_month_end_date: For YTD report - the end date from the Last Month report (YYYY-MM-DD format)
-                            Used to calculate YTD range: Jan 1 of that year to this date
+    
+    Both report types use explicit start_date and end_date parameters:
+    - last_month: First to last day of previous month
+    - ytd: January 1 to last day of previous month
     """
     base_url = get_qbo_base_url()
     url = f"{base_url}/v3/company/{realm_id}/reports/ClassSales"
@@ -179,6 +180,12 @@ def fetch_class_sales_report(
     
     # Build class parameter - comma-separated IDs
     class_param = ",".join(class_ids) if class_ids else ""
+    
+    # Calculate last month's date range
+    now = datetime.utcnow()
+    last_month = now - relativedelta(months=1)
+    last_month_start = datetime(last_month.year, last_month.month, 1)
+    last_month_end = last_month_start + relativedelta(months=1) - timedelta(days=1)
     
     # Build params based on report type
     params = {
@@ -193,20 +200,14 @@ def fetch_class_sales_report(
         params["class"] = class_param
     
     if report_type == "last_month":
-        # Always use date_macro for Last Month - this ensures QuickBooks determines the actual period
-        params["date_macro"] = "Last Month"
+        # Last Month: first to last day of previous month
+        params["start_date"] = last_month_start.strftime("%Y-%m-%d")
+        params["end_date"] = last_month_end.strftime("%Y-%m-%d")
     else:  # ytd
-        # YTD dates are derived from the Last Month report's actual period
-        # This ensures YTD aligns with the Last Month being reported
-        if not last_month_end_date:
-            raise ValueError("last_month_end_date is required for YTD report")
-        
-        # Parse the end date to determine the year
-        end_date = datetime.strptime(last_month_end_date, "%Y-%m-%d")
-        start_date = datetime(end_date.year, 1, 1)  # Jan 1 of the same year
-        
-        params["start_date"] = start_date.strftime("%Y-%m-%d")
-        params["end_date"] = end_date.strftime("%Y-%m-%d")
+        # YTD: January 1 of last month's year to end of last month
+        ytd_start = datetime(last_month_end.year, 1, 1)
+        params["start_date"] = ytd_start.strftime("%Y-%m-%d")
+        params["end_date"] = last_month_end.strftime("%Y-%m-%d")
     
     print(f"📊 Fetching {report_type} ClassSales report with params: {params}")
     
@@ -322,8 +323,15 @@ async def generate_rvcr_report(
         # 5. Query class IDs from QuickBooks
         class_ids = query_class_ids(realm_id, access_token)
         
-        # 6. Fetch Last Month report FIRST (uses date_macro="Last Month")
-        # This determines the actual period from QuickBooks
+        # 6. Calculate the period dates (last month)
+        now = datetime.utcnow()
+        last_month = now - relativedelta(months=1)
+        period_start = datetime(last_month.year, last_month.month, 1).strftime("%Y-%m-%d")
+        period_end = (datetime(last_month.year, last_month.month, 1) + relativedelta(months=1) - timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        print(f"📅 Report period: {period_start} to {period_end}")
+        
+        # 7. Fetch Last Month report (uses start_date and end_date)
         last_month_data = fetch_class_sales_report(
             realm_id=realm_id,
             access_token=access_token,
@@ -332,35 +340,17 @@ async def generate_rvcr_report(
             report_type="last_month"
         )
         
-        # 7. Extract the actual period from the Last Month report header
+        # Extract report basis from header
         lm_header = last_month_data.get("Header", {})
-        period_start = lm_header.get("StartPeriod", "")
-        period_end = lm_header.get("EndPeriod", "")
         report_basis = lm_header.get("ReportBasis", "Cash")
         
-        # Fallback: If QuickBooks doesn't return period info, calculate it from current date
-        # Since we're using date_macro="Last Month", we know it's the previous month
-        if not period_end:
-            now = datetime.utcnow()
-            # Get last month
-            last_month = now - relativedelta(months=1)
-            # First day of last month
-            period_start = datetime(last_month.year, last_month.month, 1).strftime("%Y-%m-%d")
-            # Last day of last month
-            period_end = (datetime(last_month.year, last_month.month, 1) + relativedelta(months=1) - timedelta(days=1)).strftime("%Y-%m-%d")
-            print(f"📅 Last Month period (calculated fallback): {period_start} to {period_end}")
-        else:
-            print(f"📅 Last Month period: {period_start} to {period_end}")
-        
-        # 8. Fetch YTD report using dates derived from Last Month's period
-        # YTD = Jan 1 of that year to the end of Last Month
+        # 8. Fetch YTD report (uses start_date and end_date)
         ytd_data = fetch_class_sales_report(
             realm_id=realm_id,
             access_token=access_token,
             department_id=department_id,
             class_ids=class_ids,
-            report_type="ytd",
-            last_month_end_date=period_end  # Pass the actual end date for YTD calculation
+            report_type="ytd"
         )
         
         # Generate report name: Franchise # - mmyyyy RVCR
