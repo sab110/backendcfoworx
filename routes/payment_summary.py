@@ -332,20 +332,27 @@ def calculate_payment_summary(
     # Calculate royalties for Reduced Rate Services
     reduced_royalty = calculate_reduced_rate_royalty(reduced_rate_total)
     
-    # Calculate proportional royalties for each Standard Rate category
-    # Royalty is proportionally allocated based on each category's contribution to the total
+    # Calculate proportional royalty rate for Standard Rate and Reduced Rate services
+    # Royalty is proportionally allocated based on each subcategory's contribution to the total
     std_royalty_rate = standard_royalty["royalty"] / standard_rate_total if standard_rate_total > 0 else 0
-    
-    water_royalty = round(water_total * std_royalty_rate, 2)
-    fire_royalty = round(fire_total * std_royalty_rate, 2)
-    mold_royalty = round(mold_total * std_royalty_rate, 2)
-    other_royalty = round(other_total * std_royalty_rate, 2)
-    
-    # Calculate proportional royalties for each Reduced Rate category
     red_royalty_rate = reduced_royalty["royalty"] / reduced_rate_total if reduced_rate_total > 0 else 0
     
-    subcontract_royalty = round(subcontract_total * red_royalty_rate, 2)
-    reconstruction_royalty = round(reconstruction_total * red_royalty_rate, 2)
+    # Calculate royalties for each subcategory (Commercial and Residential separately)
+    # Standard Rate categories
+    water_commercial_royalty = round(categories["water"]["commercial"] * std_royalty_rate, 2)
+    water_residential_royalty = round(categories["water"]["residential"] * std_royalty_rate, 2)
+    fire_commercial_royalty = round(categories["fire"]["commercial"] * std_royalty_rate, 2)
+    fire_residential_royalty = round(categories["fire"]["residential"] * std_royalty_rate, 2)
+    mold_commercial_royalty = round(categories["mold_bio"]["commercial"] * std_royalty_rate, 2)
+    mold_residential_royalty = round(categories["mold_bio"]["residential"] * std_royalty_rate, 2)
+    other_commercial_royalty = round(categories["other"]["commercial"] * std_royalty_rate, 2)
+    other_residential_royalty = round(categories["other"]["residential"] * std_royalty_rate, 2)
+    
+    # Reduced Rate categories
+    subcontract_commercial_royalty = round(categories["subcontract"]["commercial"] * red_royalty_rate, 2)
+    subcontract_residential_royalty = round(categories["subcontract"]["residential"] * red_royalty_rate, 2)
+    reconstruction_commercial_royalty = round(categories["reconstruction"]["commercial"] * red_royalty_rate, 2)
+    reconstruction_residential_royalty = round(categories["reconstruction"]["residential"] * red_royalty_rate, 2)
     
     # Calculate fees
     fixed_fee = standard_royalty["fixed_fee"]
@@ -382,40 +389,28 @@ def calculate_payment_summary(
         "period_year": period_year,
         "categories": {
             "water": {
-                "commercial": {"this_month": categories["water"]["commercial"], "ytd": ytd_categories["water"]["commercial"]},
-                "residential": {"this_month": categories["water"]["residential"], "ytd": ytd_categories["water"]["residential"]},
-                "total": {"this_month": water_total, "ytd": ytd_water},
-                "royalty": water_royalty,
+                "commercial": {"this_month": categories["water"]["commercial"], "ytd": ytd_categories["water"]["commercial"], "royalty": water_commercial_royalty},
+                "residential": {"this_month": categories["water"]["residential"], "ytd": ytd_categories["water"]["residential"], "royalty": water_residential_royalty},
             },
             "fire": {
-                "commercial": {"this_month": categories["fire"]["commercial"], "ytd": ytd_categories["fire"]["commercial"]},
-                "residential": {"this_month": categories["fire"]["residential"], "ytd": ytd_categories["fire"]["residential"]},
-                "total": {"this_month": fire_total, "ytd": ytd_fire},
-                "royalty": fire_royalty,
+                "commercial": {"this_month": categories["fire"]["commercial"], "ytd": ytd_categories["fire"]["commercial"], "royalty": fire_commercial_royalty},
+                "residential": {"this_month": categories["fire"]["residential"], "ytd": ytd_categories["fire"]["residential"], "royalty": fire_residential_royalty},
             },
             "mold_bio": {
-                "commercial": {"this_month": categories["mold_bio"]["commercial"], "ytd": ytd_categories["mold_bio"]["commercial"]},
-                "residential": {"this_month": categories["mold_bio"]["residential"], "ytd": ytd_categories["mold_bio"]["residential"]},
-                "total": {"this_month": mold_total, "ytd": ytd_mold},
-                "royalty": mold_royalty,
+                "commercial": {"this_month": categories["mold_bio"]["commercial"], "ytd": ytd_categories["mold_bio"]["commercial"], "royalty": mold_commercial_royalty},
+                "residential": {"this_month": categories["mold_bio"]["residential"], "ytd": ytd_categories["mold_bio"]["residential"], "royalty": mold_residential_royalty},
             },
             "other": {
-                "commercial": {"this_month": categories["other"]["commercial"], "ytd": ytd_categories["other"]["commercial"]},
-                "residential": {"this_month": categories["other"]["residential"], "ytd": ytd_categories["other"]["residential"]},
-                "total": {"this_month": other_total, "ytd": ytd_other},
-                "royalty": other_royalty,
+                "commercial": {"this_month": categories["other"]["commercial"], "ytd": ytd_categories["other"]["commercial"], "royalty": other_commercial_royalty},
+                "residential": {"this_month": categories["other"]["residential"], "ytd": ytd_categories["other"]["residential"], "royalty": other_residential_royalty},
             },
             "subcontract": {
-                "commercial": {"this_month": categories["subcontract"]["commercial"], "ytd": ytd_categories["subcontract"]["commercial"]},
-                "residential": {"this_month": categories["subcontract"]["residential"], "ytd": ytd_categories["subcontract"]["residential"]},
-                "total": {"this_month": subcontract_total, "ytd": ytd_subcontract},
-                "royalty": subcontract_royalty,
+                "commercial": {"this_month": categories["subcontract"]["commercial"], "ytd": ytd_categories["subcontract"]["commercial"], "royalty": subcontract_commercial_royalty},
+                "residential": {"this_month": categories["subcontract"]["residential"], "ytd": ytd_categories["subcontract"]["residential"], "royalty": subcontract_residential_royalty},
             },
             "reconstruction": {
-                "commercial": {"this_month": categories["reconstruction"]["commercial"], "ytd": ytd_categories["reconstruction"]["commercial"]},
-                "residential": {"this_month": categories["reconstruction"]["residential"], "ytd": ytd_categories["reconstruction"]["residential"]},
-                "total": {"this_month": reconstruction_total, "ytd": ytd_reconstruction},
-                "royalty": reconstruction_royalty,
+                "commercial": {"this_month": categories["reconstruction"]["commercial"], "ytd": ytd_categories["reconstruction"]["commercial"], "royalty": reconstruction_commercial_royalty},
+                "residential": {"this_month": categories["reconstruction"]["residential"], "ytd": ytd_categories["reconstruction"]["residential"], "royalty": reconstruction_residential_royalty},
             },
         },
         "subtotals": {
@@ -491,8 +486,11 @@ def generate_payment_summary_excel(summary: dict, output_path: str) -> str:
     
     row = 1
     
-    # Header section
-    ws.cell(row=row, column=1, value="Royalty Reporting").font = header_font
+    # Header section - "Payment Summary" merged and centered
+    ws.merge_cells('A1:E1')
+    header_cell = ws.cell(row=row, column=1, value="Payment Summary")
+    header_cell.font = header_font
+    header_cell.alignment = Alignment(horizontal='center')
     row += 2
     
     # Franchise info
@@ -537,7 +535,7 @@ def generate_payment_summary_excel(summary: dict, output_path: str) -> str:
         ws.cell(row=row, column=1, value=cat_name).font = section_font
         row += 1
         
-        # Commercial
+        # Commercial with Royalty
         ws.cell(row=row, column=1, value="")
         ws.cell(row=row, column=2, value="Commercial:")
         cell_rev = ws.cell(row=row, column=3, value=cat_data["commercial"]["this_month"])
@@ -545,9 +543,11 @@ def generate_payment_summary_excel(summary: dict, output_path: str) -> str:
         cell_rev.fill = yellow_fill
         cell_ytd = ws.cell(row=row, column=4, value=cat_data["commercial"]["ytd"])
         cell_ytd.number_format = '$#,##0.00'
+        cell_royalty = ws.cell(row=row, column=5, value=cat_data["commercial"]["royalty"])
+        cell_royalty.number_format = '$#,##0.00'
         row += 1
         
-        # Residential
+        # Residential with Royalty
         ws.cell(row=row, column=1, value="")
         ws.cell(row=row, column=2, value="Residential:")
         cell_rev = ws.cell(row=row, column=3, value=cat_data["residential"]["this_month"])
@@ -555,21 +555,8 @@ def generate_payment_summary_excel(summary: dict, output_path: str) -> str:
         cell_rev.fill = yellow_fill
         cell_ytd = ws.cell(row=row, column=4, value=cat_data["residential"]["ytd"])
         cell_ytd.number_format = '$#,##0.00'
-        row += 1
-        
-        # Category Total with Royalty
-        ws.cell(row=row, column=1, value="")
-        cell_lbl = ws.cell(row=row, column=2, value=f"Total {cat_name}:")
-        cell_lbl.font = section_font
-        cell_rev = ws.cell(row=row, column=3, value=cat_data["total"]["this_month"])
-        cell_rev.number_format = '$#,##0.00'
-        cell_rev.font = section_font
-        cell_ytd = ws.cell(row=row, column=4, value=cat_data["total"]["ytd"])
-        cell_ytd.number_format = '$#,##0.00'
-        cell_ytd.font = section_font
-        cell_royalty = ws.cell(row=row, column=5, value=cat_data["royalty"])
+        cell_royalty = ws.cell(row=row, column=5, value=cat_data["residential"]["royalty"])
         cell_royalty.number_format = '$#,##0.00'
-        cell_royalty.font = section_font
         row += 1
     
     # Subtotals
