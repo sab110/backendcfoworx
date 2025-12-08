@@ -299,7 +299,7 @@ def calculate_payment_summary(
     # Extract YTD totals
     ytd_categories = extract_category_totals(ytd_data)
     
-    # Calculate subtotals - This Month
+    # Calculate category totals - This Month
     water_total = categories["water"]["commercial"] + categories["water"]["residential"]
     fire_total = categories["fire"]["commercial"] + categories["fire"]["residential"]
     mold_total = categories["mold_bio"]["commercial"] + categories["mold_bio"]["residential"]
@@ -326,9 +326,26 @@ def calculate_payment_summary(
     # Calculate YTD before this month (for cap calculations)
     ytd_standard_before = ytd_standard_rate - standard_rate_total
     
-    # Calculate royalties
+    # Calculate royalties for Standard Rate Services
     standard_royalty = calculate_standard_rate_royalty(standard_rate_total)
+    
+    # Calculate royalties for Reduced Rate Services
     reduced_royalty = calculate_reduced_rate_royalty(reduced_rate_total)
+    
+    # Calculate proportional royalties for each Standard Rate category
+    # Royalty is proportionally allocated based on each category's contribution to the total
+    std_royalty_rate = standard_royalty["royalty"] / standard_rate_total if standard_rate_total > 0 else 0
+    
+    water_royalty = round(water_total * std_royalty_rate, 2)
+    fire_royalty = round(fire_total * std_royalty_rate, 2)
+    mold_royalty = round(mold_total * std_royalty_rate, 2)
+    other_royalty = round(other_total * std_royalty_rate, 2)
+    
+    # Calculate proportional royalties for each Reduced Rate category
+    red_royalty_rate = reduced_royalty["royalty"] / reduced_rate_total if reduced_rate_total > 0 else 0
+    
+    subcontract_royalty = round(subcontract_total * red_royalty_rate, 2)
+    reconstruction_royalty = round(reconstruction_total * red_royalty_rate, 2)
     
     # Calculate fees
     fixed_fee = standard_royalty["fixed_fee"]
@@ -367,26 +384,38 @@ def calculate_payment_summary(
             "water": {
                 "commercial": {"this_month": categories["water"]["commercial"], "ytd": ytd_categories["water"]["commercial"]},
                 "residential": {"this_month": categories["water"]["residential"], "ytd": ytd_categories["water"]["residential"]},
+                "total": {"this_month": water_total, "ytd": ytd_water},
+                "royalty": water_royalty,
             },
             "fire": {
                 "commercial": {"this_month": categories["fire"]["commercial"], "ytd": ytd_categories["fire"]["commercial"]},
                 "residential": {"this_month": categories["fire"]["residential"], "ytd": ytd_categories["fire"]["residential"]},
+                "total": {"this_month": fire_total, "ytd": ytd_fire},
+                "royalty": fire_royalty,
             },
             "mold_bio": {
                 "commercial": {"this_month": categories["mold_bio"]["commercial"], "ytd": ytd_categories["mold_bio"]["commercial"]},
                 "residential": {"this_month": categories["mold_bio"]["residential"], "ytd": ytd_categories["mold_bio"]["residential"]},
+                "total": {"this_month": mold_total, "ytd": ytd_mold},
+                "royalty": mold_royalty,
             },
             "other": {
                 "commercial": {"this_month": categories["other"]["commercial"], "ytd": ytd_categories["other"]["commercial"]},
                 "residential": {"this_month": categories["other"]["residential"], "ytd": ytd_categories["other"]["residential"]},
+                "total": {"this_month": other_total, "ytd": ytd_other},
+                "royalty": other_royalty,
             },
             "subcontract": {
                 "commercial": {"this_month": categories["subcontract"]["commercial"], "ytd": ytd_categories["subcontract"]["commercial"]},
                 "residential": {"this_month": categories["subcontract"]["residential"], "ytd": ytd_categories["subcontract"]["residential"]},
+                "total": {"this_month": subcontract_total, "ytd": ytd_subcontract},
+                "royalty": subcontract_royalty,
             },
             "reconstruction": {
                 "commercial": {"this_month": categories["reconstruction"]["commercial"], "ytd": ytd_categories["reconstruction"]["commercial"]},
                 "residential": {"this_month": categories["reconstruction"]["residential"], "ytd": ytd_categories["reconstruction"]["residential"]},
+                "total": {"this_month": reconstruction_total, "ytd": ytd_reconstruction},
+                "royalty": reconstruction_royalty,
             },
         },
         "subtotals": {
@@ -493,15 +522,15 @@ def generate_payment_summary_excel(summary: dict, output_path: str) -> str:
     
     # Category data
     categories_config = [
-        ("Water Restoration", "water"),
-        ("Fire Restoration", "fire"),
-        ("Mold/Bio Haz. Restoration", "mold_bio"),
-        ("Other", "other"),
-        ("Subcontract (Mitigation)", "subcontract"),
-        ("Reconstruction (In-House & Subcontract)", "reconstruction"),
+        ("Water Restoration", "water", "standard"),
+        ("Fire Restoration", "fire", "standard"),
+        ("Mold/Bio Haz. Restoration", "mold_bio", "standard"),
+        ("Other", "other", "standard"),
+        ("Subcontract (Mitigation)", "subcontract", "reduced"),
+        ("Reconstruction (In-House & Subcontract)", "reconstruction", "reduced"),
     ]
     
-    for cat_name, cat_key in categories_config:
+    for cat_name, cat_key, rate_type in categories_config:
         cat_data = summary["categories"][cat_key]
         
         # Category header
@@ -526,6 +555,21 @@ def generate_payment_summary_excel(summary: dict, output_path: str) -> str:
         cell_rev.fill = yellow_fill
         cell_ytd = ws.cell(row=row, column=4, value=cat_data["residential"]["ytd"])
         cell_ytd.number_format = '$#,##0.00'
+        row += 1
+        
+        # Category Total with Royalty
+        ws.cell(row=row, column=1, value="")
+        cell_lbl = ws.cell(row=row, column=2, value=f"Total {cat_name}:")
+        cell_lbl.font = section_font
+        cell_rev = ws.cell(row=row, column=3, value=cat_data["total"]["this_month"])
+        cell_rev.number_format = '$#,##0.00'
+        cell_rev.font = section_font
+        cell_ytd = ws.cell(row=row, column=4, value=cat_data["total"]["ytd"])
+        cell_ytd.number_format = '$#,##0.00'
+        cell_ytd.font = section_font
+        cell_royalty = ws.cell(row=row, column=5, value=cat_data["royalty"])
+        cell_royalty.number_format = '$#,##0.00'
+        cell_royalty.font = section_font
         row += 1
     
     # Subtotals
