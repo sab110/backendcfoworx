@@ -23,8 +23,10 @@ from models import (
     CompanyInfo,
     CompanyLicenseMapping,
     GeneratedReport,
+    EmailPreference,
 )
 from services.azure_storage_service import AzureStorageService
+from services.email_service import email_service
 from generate_royalty_report import RoyaltyReportGenerator
 from routes.quickbooks_auth import get_auth_client
 
@@ -248,6 +250,78 @@ def generate_report_name(franchise_number: str, period_end: str) -> str:
     padded_franchise = franchise_number.zfill(5)
     
     return f"{padded_franchise} - {mmyyyy} RVCR"
+
+
+def get_report_recipients(realm_id: str, db: Session) -> list:
+    """
+    Get email addresses that should receive report notifications.
+    Returns list of email addresses from EmailPreference where receive_reports is enabled.
+    """
+    preferences = db.query(EmailPreference).filter_by(
+        realm_id=realm_id,
+        receive_reports="true"
+    ).all()
+    
+    return [pref.email for pref in preferences if pref.email]
+
+
+def format_period_display(period_end: str) -> str:
+    """
+    Format period_end date into a display-friendly format.
+    Example: "2024-08-31" -> "August 2024"
+    """
+    try:
+        date_obj = datetime.strptime(period_end, "%Y-%m-%d")
+        return date_obj.strftime("%B %Y")
+    except:
+        return period_end
+
+
+def send_report_email(
+    db: Session,
+    realm_id: str,
+    company_name: str,
+    report_type: str,
+    report_period: str,
+    franchise_number: str,
+    excel_path: Optional[str] = None,
+    pdf_path: Optional[str] = None,
+    excel_url: Optional[str] = None,
+    pdf_url: Optional[str] = None
+) -> dict:
+    """
+    Send report notification email with attachments to configured recipients.
+    """
+    recipients = get_report_recipients(realm_id, db)
+    
+    if not recipients:
+        print(f"No email recipients configured for realm_id: {realm_id}")
+        return {"sent": False, "reason": "No recipients configured"}
+    
+    try:
+        result = email_service.send_report_with_files(
+            to=recipients,
+            company_name=company_name,
+            report_type=report_type,
+            report_period=report_period,
+            franchise_number=franchise_number,
+            excel_path=excel_path,
+            pdf_path=pdf_path,
+            excel_url=excel_url,
+            pdf_url=pdf_url,
+            db=db,
+            realm_id=realm_id
+        )
+        
+        if result.get("success"):
+            print(f"Report email sent to {len(recipients)} recipient(s)")
+        else:
+            print(f"Report email failed: {result.get('error')}")
+        
+        return result
+    except Exception as e:
+        print(f"Email sending error: {str(e)}")
+        return {"sent": False, "error": str(e)}
 
 
 # ------------------------------------------------------
@@ -476,7 +550,26 @@ async def generate_rvcr_report(
         
         print(f"💾 Report record saved: ID={generated_report.id}")
         
-        # 13. Cleanup temp files
+        # 13. Generate SAS URLs for download
+        excel_sas_url = storage.generate_sas_url(excel_blob_name)  # Default 10 years expiry
+        pdf_sas_url = storage.generate_sas_url(pdf_blob_name) if pdf_blob_name else None
+        
+        # 14. Send email notification with attachments
+        report_period_display = format_period_display(period_end)
+        email_result = send_report_email(
+            db=db,
+            realm_id=realm_id,
+            company_name=main_group_name,
+            report_type="RVCR",
+            report_period=report_period_display,
+            franchise_number=franchise_number,
+            excel_path=excel_path,
+            pdf_path=pdf_path if pdf_available else None,
+            excel_url=excel_sas_url,
+            pdf_url=pdf_sas_url
+        )
+        
+        # 15. Cleanup temp files
         try:
             os.remove(last_month_file)
             os.remove(ytd_file)
@@ -486,10 +579,6 @@ async def generate_rvcr_report(
             os.rmdir(temp_dir)
         except Exception as cleanup_error:
             print(f"⚠️ Cleanup warning: {cleanup_error}")
-        
-        # 14. Generate SAS URLs for immediate download
-        excel_sas_url = storage.generate_sas_url(excel_blob_name)  # Default 10 years expiry
-        pdf_sas_url = storage.generate_sas_url(pdf_blob_name) if pdf_blob_name else None
         
         # Build response message
         if pdf_available:

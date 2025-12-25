@@ -20,14 +20,19 @@ from models import (
     QuickBooksToken, 
     CompanyInfo, 
     CompanyLicenseMapping, 
-    GeneratedReport
+    GeneratedReport,
+    EmailPreference
 )
 from services.azure_storage_service import AzureStorageService
+from services.email_service import email_service
 from routes.rvcr_reports import (
     fetch_class_sales_report,
     query_class_ids,
     get_qbo_base_url,
-    refresh_token_if_expired
+    refresh_token_if_expired,
+    get_report_recipients,
+    format_period_display,
+    send_report_email
 )
 
 import openpyxl
@@ -869,7 +874,23 @@ async def generate_payment_summary(
         db.add(report_record)
         db.commit()
         
-        # 16. Cleanup temp files
+        # 16. Send email notification with attachments
+        company_name = company_info.company_name if company_info else "Company"
+        report_period_display = format_period_display(period_end)
+        email_result = send_report_email(
+            db=db,
+            realm_id=realm_id,
+            company_name=company_name,
+            report_type="Payment Summary",
+            report_period=report_period_display,
+            franchise_number=franchise_number,
+            excel_path=excel_path,
+            pdf_path=pdf_path if pdf_available else None,
+            excel_url=excel_sas_url,
+            pdf_url=pdf_sas_url
+        )
+        
+        # 17. Cleanup temp files
         try:
             os.remove(excel_path)
             if pdf_available and os.path.exists(pdf_path):
