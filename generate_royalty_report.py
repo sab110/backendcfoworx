@@ -90,10 +90,11 @@ class RoyaltyReportGenerator:
         - Summary rows contain totals for sections
         - Uses full path keys to differentiate items with same name under different parents
         - Also captures Header-level values (unclassified amounts at subcategory level)
+        - IMPORTANT: Data rows directly under main categories are treated as subcategory totals
         """
         totals = {}
         
-        def process_row(row, parent_path=""):
+        def process_row(row, parent_path="", depth=0):
             """Recursively process rows according to QB structure"""
             
             row_type = row.get('type', '')
@@ -123,7 +124,7 @@ class RoyaltyReportGenerator:
                 # Process nested rows with updated path
                 if 'Rows' in row and 'Row' in row['Rows']:
                     for nested_row in row['Rows']['Row']:
-                        process_row(nested_row, current_path)
+                        process_row(nested_row, current_path, depth + 1)
                 
                 # Process Summary (contains the total for this section)
                 if 'Summary' in row:
@@ -142,11 +143,17 @@ class RoyaltyReportGenerator:
                     item_name = col_data[0].get('value', '').strip()
                     item_value = col_data[-1].get('value', '0.00')
                     
-                    # Store data row values with FULL PATH to differentiate same-named items
                     if item_name and item_name not in ['Interest & Credit Card Fees', 'SD - Excise Tax']:
                         # Create full path key: parent_path::item_name
                         full_key = f"{parent_path}::{item_name}" if parent_path else item_name
                         totals[f"DATA::{full_key}"] = self.format_currency(item_value)
+                        
+                        # IMPORTANT: If this Data row is at depth 1 (directly under main category),
+                        # it represents a subcategory total (e.g., "Residential - Fire" under "2 - FIRE")
+                        # Store it as "Total [name]" to match the Section Summary format
+                        if depth == 1 and (item_name.startswith('Commercial') or item_name.startswith('Residential')):
+                            total_key = f"Total {item_name}"
+                            totals[total_key] = self.format_currency(item_value)
             
             # Handle rows without explicit type (legacy format or special cases)
             else:
@@ -163,12 +170,12 @@ class RoyaltyReportGenerator:
                 # Process nested rows
                 if 'Rows' in row and 'Row' in row['Rows']:
                     for nested_row in row['Rows']['Row']:
-                        process_row(nested_row, parent_path)
+                        process_row(nested_row, parent_path, depth)
         
         # Process top-level rows
         if 'Rows' in json_data and 'Row' in json_data['Rows']:
             for row in json_data['Rows']['Row']:
-                process_row(row)
+                process_row(row, "", 0)
         
         return totals
     
@@ -176,6 +183,10 @@ class RoyaltyReportGenerator:
         """
         Dynamically extract the category structure from QuickBooks JSON
         Returns a list of main categories with their subcategories and items
+        
+        IMPORTANT: Handles two cases:
+        1. Subcategories as Section rows (with Header, Rows, Summary)
+        2. Subcategories as Data rows directly under main category (just ColData with total)
         """
         categories = []
         
@@ -201,6 +212,17 @@ class RoyaltyReportGenerator:
                                 items.append(item_name)
             return items
         
+        def is_subcategory_data_row(row):
+            """Check if a Data row represents a subcategory (Commercial/Residential)"""
+            if row.get('type') == 'Data' or ('ColData' in row and 'Summary' not in row and 'Header' not in row):
+                col_data = row.get('ColData', [])
+                if col_data:
+                    name = col_data[0].get('value', '').strip()
+                    # Subcategory names typically start with Commercial or Residential
+                    if name and (name.startswith('Commercial') or name.startswith('Residential')):
+                        return True
+            return False
+        
         # Process top-level rows (main categories)
         if 'Rows' in json_data and 'Row' in json_data['Rows']:
             for main_row in json_data['Rows']['Row']:
@@ -224,6 +246,7 @@ class RoyaltyReportGenerator:
                     # Process subcategories
                     if 'Rows' in main_row and 'Row' in main_row['Rows']:
                         for sub_row in main_row['Rows']['Row']:
+                            # Case 1: Subcategory as Section row
                             if sub_row.get('type') == 'Section':
                                 sub_name = get_section_name(sub_row)
                                 
@@ -233,7 +256,8 @@ class RoyaltyReportGenerator:
                                 subcategory = {
                                     'key': sub_name,
                                     'name': f"   {sub_name}",
-                                    'items': []
+                                    'items': [],
+                                    'is_data_row': False
                                 }
                                 
                                 # Extract items from subcategory
@@ -242,6 +266,19 @@ class RoyaltyReportGenerator:
                                 
                                 if subcategory['items']:  # Only add if has items
                                     category['subcategories'].append(subcategory)
+                            
+                            # Case 2: Subcategory as Data row (has total but no nested items)
+                            elif is_subcategory_data_row(sub_row):
+                                col_data = sub_row.get('ColData', [])
+                                sub_name = col_data[0].get('value', '').strip()
+                                
+                                subcategory = {
+                                    'key': sub_name,
+                                    'name': f"   {sub_name}",
+                                    'items': [],  # No items - total is in the Data row itself
+                                    'is_data_row': True  # Flag to indicate this is a Data row subcategory
+                                }
+                                category['subcategories'].append(subcategory)
                     
                     if category['subcategories']:  # Only add if has subcategories
                         categories.append(category)
@@ -251,6 +288,7 @@ class RoyaltyReportGenerator:
     def merge_category_structures(self, struct1: List[Dict], struct2: List[Dict]) -> List[Dict]:
         """
         Merge two category structures to capture all categories and items from both
+        Handles both Section-type subcategories (with items) and Data-row subcategories (totals only)
         """
         # Create a dict for easy lookup
         merged = {}
@@ -266,15 +304,21 @@ class RoyaltyReportGenerator:
             
             for subcat in cat.get('subcategories', []):
                 subcat_key = subcat['key']
+                is_data_row = subcat.get('is_data_row', False)
+                
                 if subcat_key not in merged[cat_key]['subcategories']:
                     merged[cat_key]['subcategories'][subcat_key] = {
                         'key': subcat['key'],
                         'name': subcat['name'],
-                        'items': set(subcat.get('items', []))
+                        'items': set(subcat.get('items', [])),
+                        'is_data_row': is_data_row
                     }
                 else:
                     # Merge items
                     merged[cat_key]['subcategories'][subcat_key]['items'].update(subcat.get('items', []))
+                    # If either version has items, it's not a pure data-row subcategory
+                    if merged[cat_key]['subcategories'][subcat_key]['items']:
+                        merged[cat_key]['subcategories'][subcat_key]['is_data_row'] = False
         
         # Convert back to list format
         result = []
@@ -286,7 +330,8 @@ class RoyaltyReportGenerator:
                 subcats.append({
                     'key': subcat['key'],
                     'name': subcat['name'],
-                    'items': sorted(list(subcat['items']))
+                    'items': sorted(list(subcat['items'])),
+                    'is_data_row': subcat.get('is_data_row', False)
                 })
             result.append({
                 'key': cat['key'],
@@ -921,9 +966,9 @@ def main():
     generator = RoyaltyReportGenerator()
     
     # Define file paths
-    last_month_file = "Department/SERVPRO Team Marchese/id7rvcr.json"  # Result from Last Month api call
-    ytd_file = "Department/SERVPRO Team Marchese/id7rvcrytd.json"  # Result from YTD api call
-    output_file = "Department/Generated_RVCR_Sarpy County_11533.xlsx"
+    last_month_file = r"Royalty Calculation\rvcrsep.json"  # Result from Last Month api call
+    ytd_file = r"Royalty Calculation\rvcrsepytd.json"  # Result from YTD api call
+    output_file = r"Royalty Calculation\Generated_RVCR_Sarpy County_11533_2.xlsx"
     
     # Report configuration
     report_title = "RVCR - Sarpy County 11533" # QBO Department Name
