@@ -76,33 +76,66 @@ def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_d
                 realm_id=realm_id,
             )
         elif email_type == "subscription_canceled":
-            # Custom cancellation email
-            subject = "Your CFO Worx Subscription Has Been Canceled"
+            # Professional cancellation email
+            subject = "CFO Worx Subscription Canceled"
             html = f"""
             <!DOCTYPE html>
             <html>
-            <head><meta charset="utf-8"></head>
-            <body style="margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background-color: #f4f7fa;">
+            <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f5f5f5;">
                 <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-                    <div style="background: #dc2626; border-radius: 16px 16px 0 0; padding: 40px 30px; text-align: center;">
-                        <h1 style="color: #fff; margin: 0; font-size: 28px;">Subscription Canceled</h1>
+                    <div style="background-color: #1a365d; padding: 30px; text-align: center;">
+                        <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
+                            CFO Worx
+                        </h1>
                     </div>
-                    <div style="background: #fff; padding: 40px 30px; border-radius: 0 0 16px 16px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
-                        <p style="color: #334155; font-size: 16px;">Hi <strong>{company_name}</strong>,</p>
-                        <p style="color: #334155; font-size: 16px;">Your CFO Worx subscription has been <strong style="color: #dc2626;">canceled</strong>.</p>
-                        
-                        <div style="background: #fef2f2; border-radius: 8px; padding: 20px; margin: 20px 0; border: 1px solid #fecaca;">
-                            <p style="margin: 0 0 8px 0; color: #334155; font-size: 14px;"><strong>Status:</strong> <span style="color: #dc2626; font-weight: 700;">CANCELED</span></p>
-                            <p style="margin: 0; color: #64748b; font-size: 13px;">Your subscription will not renew. You can continue to use premium features until the end of your current billing period.</p>
-                        </div>
-                        
-                        <p style="color: #334155; font-size: 16px;">If this was a mistake or you'd like to resubscribe, you can do so anytime from your dashboard.</p>
-                        
+                    <div style="background-color: #ffffff; padding: 40px 30px; border: 1px solid #e0e0e0; border-top: none;">
+                        <h2 style="color: #1a365d; font-size: 20px; font-weight: 600; margin: 0 0 20px 0;">
+                            Subscription Cancellation Confirmed
+                        </h2>
+                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                            Dear {company_name} Team,
+                        </p>
+                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                            Your CFO Worx subscription has been canceled as requested.
+                        </p>
+                        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                            <tr>
+                                <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666; width: 140px;">
+                                    <strong>Status</strong>
+                                </td>
+                                <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #991b1b; font-weight: 600;">
+                                    CANCELED
+                                </td>
+                            </tr>
+                        </table>
+                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 20px 0;">
+                            You will continue to have access to premium features until the end of your current billing period. 
+                            After that, your account will revert to the free tier.
+                        </p>
+                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                            If you would like to reactivate your subscription, you can do so at any time from your dashboard.
+                        </p>
                         <div style="text-align: center; margin: 30px 0;">
-                            <a href="{FRONTEND_URL}/subscribe" style="display: inline-block; background: #10b981; color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600;">Resubscribe Now</a>
+                            <a href="{FRONTEND_URL}/subscribe" 
+                               style="display: inline-block; background-color: #1a365d; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 4px; font-weight: 600; font-size: 14px;">
+                                Reactivate Subscription
+                            </a>
                         </div>
-                        
-                        <p style="color: #64748b; font-size: 14px; text-align: center;">Questions? Contact our support team for assistance.</p>
+                        <p style="color: #666666; font-size: 13px; line-height: 1.6; margin: 20px 0 0 0;">
+                            If you have questions regarding your account, please contact our support team.
+                        </p>
+                    </div>
+                    <div style="padding: 20px; text-align: center; border: 1px solid #e0e0e0; border-top: none; background-color: #fafafa;">
+                        <p style="color: #666666; font-size: 12px; margin: 0 0 5px 0;">
+                            CFO Worx - Royalty Management Solutions
+                        </p>
+                        <p style="color: #999999; font-size: 11px; margin: 0;">
+                            This is an automated message. Please do not reply directly to this email.
+                        </p>
                     </div>
                 </div>
             </body>
@@ -135,30 +168,81 @@ def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_d
                 realm_id=realm_id,
             )
         elif email_type == "subscription_updated":
-            # Custom subscription updated email
+            # Professional subscription updated email
             details = extra_data or {}
-            subject = "📋 Your CFO Worx Subscription Has Been Updated"
+            status_value = details.get('status', 'N/A')
+            status_color = '#166534' if status_value == 'active' else '#92400e'
+            subject = "CFO Worx Subscription Updated"
             html = f"""
             <!DOCTYPE html>
             <html>
-            <head><meta charset="utf-8"></head>
-            <body style="margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background-color: #f4f7fa;">
+            <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f5f5f5;">
                 <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-                    <div style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); border-radius: 16px 16px 0 0; padding: 40px 30px; text-align: center;">
-                        <h1 style="color: #fff; margin: 0; font-size: 28px;">📋 Subscription Updated</h1>
+                    <div style="background-color: #1a365d; padding: 30px; text-align: center;">
+                        <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
+                            CFO Worx
+                        </h1>
                     </div>
-                    <div style="background: #fff; padding: 40px 30px; border-radius: 0 0 16px 16px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
-                        <p style="color: #334155; font-size: 16px;">Hi <strong>{company_name}</strong>,</p>
-                        <p style="color: #334155; font-size: 16px;">Your CFO Worx subscription has been updated. Here are the details:</p>
-                        <div style="background: #f8fafc; border-radius: 8px; padding: 20px; margin: 20px 0;">
-                            <p style="margin: 8px 0; color: #334155;"><strong>Plan:</strong> {details.get('plan', 'N/A')}</p>
-                            <p style="margin: 8px 0; color: #334155;"><strong>Licenses:</strong> {details.get('quantity', 1)}</p>
-                            <p style="margin: 8px 0; color: #334155;"><strong>Status:</strong> <span style="color: {'#16a34a' if details.get('status') == 'active' else '#d97706'};">{details.get('status', 'N/A').upper()}</span></p>
-                        </div>
-                        <p style="color: #64748b; font-size: 14px;">You can view and manage your subscription from your dashboard.</p>
+                    <div style="background-color: #ffffff; padding: 40px 30px; border: 1px solid #e0e0e0; border-top: none;">
+                        <h2 style="color: #1a365d; font-size: 20px; font-weight: 600; margin: 0 0 20px 0;">
+                            Subscription Updated
+                        </h2>
+                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                            Dear {company_name} Team,
+                        </p>
+                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                            Your CFO Worx subscription has been updated. Please review the details below.
+                        </p>
+                        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                            <tr>
+                                <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666; width: 140px;">
+                                    <strong>Plan</strong>
+                                </td>
+                                <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #333333;">
+                                    {details.get('plan', 'N/A')}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666;">
+                                    <strong>Licenses</strong>
+                                </td>
+                                <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #333333;">
+                                    {details.get('quantity', 1)}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666;">
+                                    <strong>Status</strong>
+                                </td>
+                                <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: {status_color}; font-weight: 600;">
+                                    {status_value.upper()}
+                                </td>
+                            </tr>
+                        </table>
+                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 20px 0;">
+                            You can view and manage your subscription from your dashboard at any time.
+                        </p>
                         <div style="text-align: center; margin: 30px 0;">
-                            <a href="{FRONTEND_URL}/dashboard" style="display: inline-block; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #fff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600;">Go to Dashboard</a>
+                            <a href="{FRONTEND_URL}/dashboard" 
+                               style="display: inline-block; background-color: #1a365d; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 4px; font-weight: 600; font-size: 14px;">
+                                Go to Dashboard
+                            </a>
                         </div>
+                        <p style="color: #666666; font-size: 13px; line-height: 1.6; margin: 20px 0 0 0;">
+                            If you have questions regarding your subscription, please contact our support team.
+                        </p>
+                    </div>
+                    <div style="padding: 20px; text-align: center; border: 1px solid #e0e0e0; border-top: none; background-color: #fafafa;">
+                        <p style="color: #666666; font-size: 12px; margin: 0 0 5px 0;">
+                            CFO Worx - Royalty Management Solutions
+                        </p>
+                        <p style="color: #999999; font-size: 11px; margin: 0;">
+                            This is an automated message. Please do not reply directly to this email.
+                        </p>
                     </div>
                 </div>
             </body>

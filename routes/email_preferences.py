@@ -469,15 +469,53 @@ async def send_test_email(
 
     result = email_service.send_email(
         to=[email],
-        subject="Test Email from CFO Worx",
+        subject="CFO Worx Email Test",
         html=f"""
-        <div style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2>🧪 Test Email</h2>
-            <p>This is a test email from CFO Worx for <strong>{company.company_name}</strong>.</p>
-            <p>If you received this email, your email configuration is working correctly!</p>
-            <hr>
-            <p style="color: #666; font-size: 12px;">Sent at: {datetime.utcnow().isoformat()}</p>
-        </div>
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f5f5f5;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                <div style="background-color: #1a365d; padding: 30px; text-align: center;">
+                    <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
+                        CFO Worx
+                    </h1>
+                </div>
+                <div style="background-color: #ffffff; padding: 40px 30px; border: 1px solid #e0e0e0; border-top: none;">
+                    <h2 style="color: #1a365d; font-size: 20px; font-weight: 600; margin: 0 0 20px 0;">
+                        Email Test Successful
+                    </h2>
+                    <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                        This is a test email from CFO Worx for <strong>{company.company_name}</strong>.
+                    </p>
+                    <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                        If you received this email, your email configuration is working correctly.
+                    </p>
+                    <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                        <tr>
+                            <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666; width: 100px;">
+                                <strong>Sent At</strong>
+                            </td>
+                            <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #333333;">
+                                {datetime.utcnow().strftime('%B %d, %Y at %I:%M %p')} UTC
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                <div style="padding: 20px; text-align: center; border: 1px solid #e0e0e0; border-top: none; background-color: #fafafa;">
+                    <p style="color: #666666; font-size: 12px; margin: 0 0 5px 0;">
+                        CFO Worx - Royalty Management Solutions
+                    </p>
+                    <p style="color: #999999; font-size: 11px; margin: 0;">
+                        This is an automated test message.
+                    </p>
+                </div>
+            </div>
+        </body>
+        </html>
         """,
         db=db,
         realm_id=realm_id,
@@ -567,31 +605,64 @@ async def debug_send_test_email(payload: dict, db: Session = Depends(get_db)):
     try:
         result = email_service.send_email(
             to=[email],
-            subject="🧪 CFO Worx Email Test",
+            subject="CFO Worx Email Test",
             html=f"""
             <!DOCTYPE html>
             <html>
-            <head><meta charset="utf-8"></head>
-            <body style="margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background-color: #f4f7fa;">
+            <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            </head>
+            <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f5f5f5;">
                 <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-                    <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 16px 16px 0 0; padding: 40px 30px; text-align: center;">
-                        <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700;">
-                            ✅ Email Test Successful!
+                    <div style="background-color: #1a365d; padding: 30px; text-align: center;">
+                        <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
+                            CFO Worx
                         </h1>
                     </div>
-                    <div style="background-color: #ffffff; padding: 40px 30px; border-radius: 0 0 16px 16px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
-                        <p style="color: #334155; font-size: 16px; line-height: 1.6;">
+                    <div style="background-color: #ffffff; padding: 40px 30px; border: 1px solid #e0e0e0; border-top: none;">
+                        <h2 style="color: #1a365d; font-size: 20px; font-weight: 600; margin: 0 0 20px 0;">
+                            Email Test Successful
+                        </h2>
+                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
                             This is a test email from CFO Worx email service.
                         </p>
-                        <p style="color: #334155; font-size: 16px; line-height: 1.6;">
-                            If you're seeing this, your email configuration is working correctly!
+                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                            If you received this message, your email configuration is working correctly.
                         </p>
-                        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
-                        <p style="color: #64748b; font-size: 14px;">
-                            <strong>Configuration:</strong><br>
-                            From: {EMAIL_FROM}<br>
-                            To: {email}<br>
-                            Sent at: {datetime.utcnow().isoformat()}Z
+                        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                            <tr>
+                                <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666; width: 100px;">
+                                    <strong>From</strong>
+                                </td>
+                                <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #333333;">
+                                    {EMAIL_FROM}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666;">
+                                    <strong>To</strong>
+                                </td>
+                                <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #333333;">
+                                    {email}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666;">
+                                    <strong>Sent At</strong>
+                                </td>
+                                <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #333333;">
+                                    {datetime.utcnow().strftime('%B %d, %Y at %I:%M %p')} UTC
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div style="padding: 20px; text-align: center; border: 1px solid #e0e0e0; border-top: none; background-color: #fafafa;">
+                        <p style="color: #666666; font-size: 12px; margin: 0 0 5px 0;">
+                            CFO Worx - Royalty Management Solutions
+                        </p>
+                        <p style="color: #999999; font-size: 11px; margin: 0;">
+                            This is an automated test message.
                         </p>
                     </div>
                 </div>

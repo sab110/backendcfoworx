@@ -515,38 +515,73 @@ async def save_selected_licenses(
                 html = f"""
                 <!DOCTYPE html>
                 <html>
-                <head><meta charset="utf-8"></head>
-                <body style="margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background-color: #f4f7fa;">
+                <head>
+                    <meta charset="utf-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                </head>
+                <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f5f5f5;">
                     <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-                        <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 16px 16px 0 0; padding: 40px 30px; text-align: center;">
-                            <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700;">
-                                🎉 Onboarding Complete!
+                        <div style="background-color: #1a365d; padding: 30px; text-align: center;">
+                            <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
+                                CFO Worx
                             </h1>
-                            <p style="color: #a7f3d0; margin: 10px 0 0 0; font-size: 16px;">
-                                You're all set up and ready to go
-                            </p>
                         </div>
-                        <div style="background-color: #ffffff; padding: 40px 30px; border-radius: 0 0 16px 16px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
-                            <p style="color: #334155; font-size: 16px; line-height: 1.6;">
-                                Hi <strong>{company_name}</strong>,
+                        <div style="background-color: #ffffff; padding: 40px 30px; border: 1px solid #e0e0e0; border-top: none;">
+                            <h2 style="color: #1a365d; font-size: 20px; font-weight: 600; margin: 0 0 20px 0;">
+                                Onboarding Complete
+                            </h2>
+                            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                                Dear {company_name} Team,
                             </p>
-                            <p style="color: #334155; font-size: 16px; line-height: 1.6;">
-                                Congratulations! Your onboarding is now complete. You've successfully:
+                            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                                Congratulations! Your CFO Worx account setup is now complete. Here's a summary of what has been configured:
                             </p>
-                            <ul style="color: #334155; font-size: 15px; line-height: 1.8;">
-                                <li>Connected your QuickBooks account</li>
-                                <li>Selected {updated_count} franchise location(s)</li>
-                                <li>Configured your department mappings</li>
-                            </ul>
-                            <p style="color: #334155; font-size: 16px; line-height: 1.6;">
-                                You can now start generating royalty reports from your dashboard.
+                            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                                <tr>
+                                    <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666; width: 180px;">
+                                        <strong>QuickBooks Connection</strong>
+                                    </td>
+                                    <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #166534; font-weight: 600;">
+                                        Connected
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666;">
+                                        <strong>Franchise Locations</strong>
+                                    </td>
+                                    <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #333333;">
+                                        {updated_count} location(s) configured
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666;">
+                                        <strong>Department Mappings</strong>
+                                    </td>
+                                    <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #166534; font-weight: 600;">
+                                        Complete
+                                    </td>
+                                </tr>
+                            </table>
+                            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 20px 0;">
+                                You can now access your dashboard to generate royalty reports and manage your franchise data.
                             </p>
                             <div style="text-align: center; margin: 30px 0;">
                                 <a href="{FRONTEND_URL}/dashboard" 
-                                   style="display: inline-block; background: linear-gradient(135deg, #1a365d 0%, #2d5a87 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
-                                    Go to Dashboard →
+                                   style="display: inline-block; background-color: #1a365d; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 4px; font-weight: 600; font-size: 14px;">
+                                    Go to Dashboard
                                 </a>
                             </div>
+                            <p style="color: #666666; font-size: 13px; line-height: 1.6; margin: 20px 0 0 0;">
+                                If you have any questions about using CFO Worx, please contact our support team.
+                            </p>
+                        </div>
+                        <div style="padding: 20px; text-align: center; border: 1px solid #e0e0e0; border-top: none; background-color: #fafafa;">
+                            <p style="color: #666666; font-size: 12px; margin: 0 0 5px 0;">
+                                CFO Worx - Royalty Management Solutions
+                            </p>
+                            <p style="color: #999999; font-size: 11px; margin: 0;">
+                                This is an automated message. Please do not reply directly to this email.
+                            </p>
                         </div>
                     </div>
                 </body>
@@ -555,7 +590,7 @@ async def save_selected_licenses(
                 
                 result = email_service.send_email(
                     to=recipients,
-                    subject=f"🎉 Onboarding Complete - {company_name}",
+                    subject=f"Onboarding Complete - {company_name}",
                     html=html,
                     db=db,
                     realm_id=realm_id,
