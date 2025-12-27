@@ -1409,6 +1409,38 @@ async def get_admin_dashboard(
         CompanyInfo.created_at >= datetime.utcnow().replace(day=1, hour=0, minute=0, second=0)
     ).count()
     
+    # Monthly signups (last 6 months)
+    monthly_signups = []
+    now = datetime.utcnow()
+    for i in range(5, -1, -1):
+        # Calculate the month
+        target_month = now.month - i
+        target_year = now.year
+        while target_month <= 0:
+            target_month += 12
+            target_year -= 1
+        
+        # Get start and end of month
+        month_start = datetime(target_year, target_month, 1)
+        if target_month == 12:
+            month_end = datetime(target_year + 1, 1, 1)
+        else:
+            month_end = datetime(target_year, target_month + 1, 1)
+        
+        # Count signups in this month
+        count = db.query(CompanyInfo).filter(
+            and_(
+                CompanyInfo.created_at >= month_start,
+                CompanyInfo.created_at < month_end
+            )
+        ).count()
+        
+        monthly_signups.append({
+            "month": month_start.strftime("%b"),
+            "year": target_year,
+            "count": count
+        })
+    
     # Subscription stats
     total_subscriptions = db.query(Subscription).count()
     active_subscriptions = db.query(Subscription).filter(Subscription.status == "active").count()
@@ -1499,6 +1531,7 @@ async def get_admin_dashboard(
             "total_license_mappings": total_mappings,
             "active_license_mappings": active_mappings
         },
+        "monthly_signups": monthly_signups,
         "alerts": {
             "has_failed_payments": unresolved_failed_payments > 0,
             "has_past_due": past_due_subscriptions > 0,
