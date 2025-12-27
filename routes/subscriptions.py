@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func, and_, extract
+from datetime import datetime, timedelta
 from db import get_db
-from models import Subscription, Plan, CompanyInfo, QuickBooksToken, User, EmailPreference, EmailLog, CompanyLicenseMapping
+from models import Subscription, Plan, CompanyInfo, QuickBooksToken, User, EmailPreference, EmailLog, CompanyLicenseMapping, GeneratedReport
 
 router = APIRouter()
 
@@ -370,4 +372,177 @@ async def delete_account(realm_id: str, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=500,
             detail=f"Error deleting account: {str(e)}"
+        )
+
+
+@router.get("/dashboard-analytics/{realm_id}")
+async def get_dashboard_analytics(realm_id: str, db: Session = Depends(get_db)):
+    """
+    Get comprehensive dashboard analytics for real-time KPIs.
+    Returns franchise stats, report counts, subscription details, and activity history.
+    """
+    try:
+        now = datetime.utcnow()
+        current_month_start = datetime(now.year, now.month, 1)
+        
+        # Get franchise/license counts
+        total_licenses = db.query(CompanyLicenseMapping).filter(
+            CompanyLicenseMapping.realm_id == realm_id
+        ).count()
+        
+        active_licenses = db.query(CompanyLicenseMapping).filter(
+            CompanyLicenseMapping.realm_id == realm_id,
+            CompanyLicenseMapping.is_active == "true"
+        ).count()
+        
+        inactive_licenses = total_licenses - active_licenses
+        
+        # Get report statistics
+        total_rvcr_reports = db.query(GeneratedReport).filter(
+            GeneratedReport.realm_id == realm_id,
+            GeneratedReport.report_type == "RVCR"
+        ).count()
+        
+        total_payment_reports = db.query(GeneratedReport).filter(
+            GeneratedReport.realm_id == realm_id,
+            GeneratedReport.report_type == "PaymentSummary"
+        ).count()
+        
+        # Reports generated this month
+        reports_this_month = db.query(GeneratedReport).filter(
+            GeneratedReport.realm_id == realm_id,
+            GeneratedReport.generated_at >= current_month_start
+        ).count()
+        
+        # Get last report generated
+        last_report = db.query(GeneratedReport).filter(
+            GeneratedReport.realm_id == realm_id
+        ).order_by(GeneratedReport.generated_at.desc()).first()
+        
+        # Get subscription details
+        subscription = db.query(Subscription).filter(
+            Subscription.realm_id == realm_id
+        ).first()
+        
+        subscription_data = None
+        if subscription:
+            subscription_data = {
+                "status": subscription.status,
+                "quantity": subscription.quantity if hasattr(subscription, 'quantity') else 1,
+                "start_date": subscription.start_date.isoformat() if subscription.start_date else None,
+                "end_date": subscription.end_date.isoformat() if subscription.end_date else None,
+            }
+        
+        # Get company info
+        company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == realm_id).first()
+        
+        # Get QuickBooks connection status
+        qb_token = db.query(QuickBooksToken).filter(QuickBooksToken.realm_id == realm_id).first()
+        qb_connected = qb_token is not None
+        qb_last_sync = qb_token.updated_at.isoformat() if qb_token and qb_token.updated_at else None
+        
+        # Get monthly franchise activity (last 6 months)
+        monthly_activity = []
+        for i in range(5, -1, -1):
+            month_date = now - timedelta(days=i*30)
+            month_name = month_date.strftime('%b')
+            
+            # Count reports generated in that month
+            month_start = datetime(month_date.year, month_date.month, 1)
+            if month_date.month == 12:
+                month_end = datetime(month_date.year + 1, 1, 1)
+            else:
+                month_end = datetime(month_date.year, month_date.month + 1, 1)
+            
+            month_reports = db.query(GeneratedReport).filter(
+                GeneratedReport.realm_id == realm_id,
+                GeneratedReport.generated_at >= month_start,
+                GeneratedReport.generated_at < month_end
+            ).count()
+            
+            monthly_activity.append({
+                "month": month_name,
+                "reports": month_reports,
+                "active_franchises": active_licenses  # Could track historical data
+            })
+        
+        # Calculate trends (compare to last month)
+        last_month_start = datetime(now.year, now.month - 1 if now.month > 1 else 12, 1)
+        if now.month == 1:
+            last_month_start = datetime(now.year - 1, 12, 1)
+        
+        last_month_reports = db.query(GeneratedReport).filter(
+            GeneratedReport.realm_id == realm_id,
+            GeneratedReport.generated_at >= last_month_start,
+            GeneratedReport.generated_at < current_month_start
+        ).count()
+        
+        reports_trend = 0
+        if last_month_reports > 0:
+            reports_trend = round(((reports_this_month - last_month_reports) / last_month_reports) * 100)
+        elif reports_this_month > 0:
+            reports_trend = 100
+        
+        # Get recent activity logs
+        recent_reports = db.query(GeneratedReport).filter(
+            GeneratedReport.realm_id == realm_id
+        ).order_by(GeneratedReport.generated_at.desc()).limit(5).all()
+        
+        recent_activity = []
+        for report in recent_reports:
+            time_diff = now - report.generated_at
+            if time_diff.days > 0:
+                time_str = f"{time_diff.days} day{'s' if time_diff.days > 1 else ''} ago"
+            elif time_diff.seconds > 3600:
+                hours = time_diff.seconds // 3600
+                time_str = f"{hours} hour{'s' if hours > 1 else ''} ago"
+            elif time_diff.seconds > 60:
+                minutes = time_diff.seconds // 60
+                time_str = f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+            else:
+                time_str = "Just now"
+            
+            recent_activity.append({
+                "type": "report",
+                "title": f"{report.report_type} Report Generated",
+                "subtitle": report.report_name or f"Franchise {report.franchise_number}",
+                "time": time_str,
+                "timestamp": report.generated_at.isoformat(),
+            })
+        
+        return {
+            "success": True,
+            "data": {
+                "franchises": {
+                    "total": total_licenses,
+                    "active": active_licenses,
+                    "inactive": inactive_licenses,
+                },
+                "reports": {
+                    "total_rvcr": total_rvcr_reports,
+                    "total_payment_summary": total_payment_reports,
+                    "total": total_rvcr_reports + total_payment_reports,
+                    "this_month": reports_this_month,
+                    "trend_percent": reports_trend,
+                    "last_generated": last_report.generated_at.isoformat() if last_report else None,
+                },
+                "subscription": subscription_data,
+                "quickbooks": {
+                    "connected": qb_connected,
+                    "last_sync": qb_last_sync,
+                },
+                "company": {
+                    "name": company.company_name if company else None,
+                    "email": company.email if company else None,
+                },
+                "monthly_activity": monthly_activity,
+                "recent_activity": recent_activity,
+            }
+        }
+        
+    except Exception as e:
+        print(f"Error fetching dashboard analytics: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching dashboard analytics: {str(e)}"
         )
