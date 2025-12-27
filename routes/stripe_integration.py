@@ -12,6 +12,12 @@ from services.logging_service import LoggingService, log_info, log_error, log_we
 router = APIRouter()
 stripe.api_key = STRIPE_SECRET_KEY
 
+def webhook_already_processed(db: Session, event_id: str) -> bool:
+    return db.query(LoggingService.model).filter(
+        LoggingService.model.event_id == event_id
+    ).first() is not None
+
+
 
 def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_data: dict = None):
     """
@@ -386,6 +392,25 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         initial_realm_id = data["metadata"]["realm_id"]
 
     # Log webhook received
+    # webhook_log = log_webhook(
+    #     db,
+    #     source="stripe",
+    #     event_type=event_type,
+    #     event_id=event_id,
+    #     status="received",
+    #     realm_id=initial_realm_id,
+    #     payload={"event_type": event_type, "object_id": data.get("id"), "ip_address": client_ip}
+    # )
+    # ---- IDEMPOTENCY CHECK ----
+    existing = db.query(LoggingService.model).filter(
+        LoggingService.model.event_id == event_id
+    ).first()
+
+    if existing:
+        print(f"Duplicate webhook received: {event_id}, skipping.")
+        return {"status": "already_processed"}
+
+    # Log webhook only once
     webhook_log = log_webhook(
         db,
         source="stripe",
@@ -393,8 +418,13 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         event_id=event_id,
         status="received",
         realm_id=initial_realm_id,
-        payload={"event_type": event_type, "object_id": data.get("id"), "ip_address": client_ip}
+        payload={
+            "event_type": event_type,
+            "object_id": data.get("id"),
+            "ip_address": client_ip,
+        }
     )
+
 
     # --- CHECKOUT COMPLETED ---
     if event_type == "checkout.session.completed":
