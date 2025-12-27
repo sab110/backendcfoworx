@@ -8,6 +8,7 @@ import openpyxl
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.page import PageMargins, PrintPageSetup
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 import os
@@ -744,6 +745,38 @@ class RoyaltyReportGenerator:
             ws.column_dimensions['D'].width = 31.8
             ws.column_dimensions['E'].width = 31.8
             
+            # ===== PAGE SETUP FOR PDF GENERATION =====
+            # Set landscape orientation
+            ws.page_setup.orientation = 'landscape'
+            
+            # Fit all columns on one page width (scale to fit)
+            ws.page_setup.fitToPage = True
+            ws.page_setup.fitToWidth = 1  # Fit to 1 page wide
+            ws.page_setup.fitToHeight = 0  # Allow multiple pages tall if needed
+            
+            # Set paper size to Letter (1) or Legal (5) - Letter is standard
+            ws.page_setup.paperSize = ws.PAPERSIZE_LETTER
+            
+            # Set print area to include all data
+            last_col_letter = 'E'
+            ws.print_area = f'A1:{last_col_letter}{current_row}'
+            
+            # Set margins (in inches) - narrower for better fit
+            ws.page_margins = PageMargins(
+                left=0.25,
+                right=0.25,
+                top=0.5,
+                bottom=0.5,
+                header=0.3,
+                footer=0.3
+            )
+            
+            # Center content on page
+            ws.print_options.horizontalCentered = True
+            
+            # Set print titles (repeat header rows on each page)
+            ws.print_title_rows = '1:6'  # Repeat rows 1-6 on each page
+            
             # Save workbook
             print(f"Saving report to {output_file}...")
             wb.save(output_file)
@@ -806,6 +839,7 @@ class RoyaltyReportGenerator:
     def _convert_to_pdf_libreoffice(self, excel_file: str, pdf_file: str) -> str:
         """
         Convert Excel to PDF using LibreOffice (cross-platform)
+        Uses the page setup settings embedded in the Excel file.
         """
         import subprocess
         import shutil
@@ -813,6 +847,9 @@ class RoyaltyReportGenerator:
         # Get absolute paths
         excel_path = os.path.abspath(excel_file)
         output_dir = os.path.dirname(os.path.abspath(pdf_file))
+        
+        # Ensure output directory exists
+        os.makedirs(output_dir, exist_ok=True)
         
         # Find LibreOffice executable
         libreoffice_paths = [
@@ -834,25 +871,38 @@ class RoyaltyReportGenerator:
         if libreoffice_cmd is None:
             raise RuntimeError("LibreOffice not found")
         
-        # Run LibreOffice in headless mode to convert to PDF
-        cmd = [
-            libreoffice_cmd,
-            '--headless',
-            '--convert-to', 'pdf',
-            '--outdir', output_dir,
-            excel_path
-        ]
-        
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=120  # 2 minute timeout
-        )
-        
-        if result.returncode != 0:
-            error_msg = result.stderr or result.stdout or "Unknown error"
-            raise RuntimeError(f"LibreOffice conversion failed: {error_msg}")
+        # Create a unique user profile to avoid conflicts with running LibreOffice instances
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp_profile:
+            # Run LibreOffice in headless mode to convert to PDF
+            # The pdf export filter respects the page setup from the Excel file
+            cmd = [
+                libreoffice_cmd,
+                '--headless',
+                '--invisible',
+                '--nologo',
+                '--nofirststartwizard',
+                f'-env:UserInstallation=file://{temp_profile}',
+                '--convert-to', 'pdf:calc_pdf_Export',  # Use Calc PDF export filter
+                '--outdir', output_dir,
+                excel_path
+            ]
+            
+            # Set environment to avoid display issues
+            env = os.environ.copy()
+            env['HOME'] = temp_profile  # Ensure LibreOffice doesn't conflict with user settings
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=180,  # 3 minute timeout
+                env=env
+            )
+            
+            if result.returncode != 0:
+                error_msg = result.stderr or result.stdout or "Unknown error"
+                raise RuntimeError(f"LibreOffice conversion failed: {error_msg}")
         
         # LibreOffice outputs PDF with same base name in output directory
         expected_pdf = os.path.join(
@@ -874,6 +924,7 @@ class RoyaltyReportGenerator:
     def _convert_to_pdf_win32(self, excel_file: str, pdf_file: str) -> str:
         """
         Convert Excel to PDF using win32com (Windows only, requires Microsoft Excel)
+        Ensures landscape orientation and all columns fit on page.
         """
         import time
         
@@ -886,11 +937,15 @@ class RoyaltyReportGenerator:
         excel_path = os.path.abspath(excel_file)
         pdf_path = os.path.abspath(pdf_file)
         
+        # Ensure output directory exists
+        os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
+        
         # Create Excel application instance
         excel = win32com.client.Dispatch("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
         
+        workbook = None
         try:
             # Open workbook
             workbook = excel.Workbooks.Open(excel_path)
@@ -898,27 +953,72 @@ class RoyaltyReportGenerator:
             # Get the active sheet
             sheet = workbook.ActiveSheet
             
-            # Set page setup for better PDF output
-            sheet.PageSetup.Orientation = 2  # Landscape
-            sheet.PageSetup.FitToPagesWide = 1
-            sheet.PageSetup.FitToPagesTall = False
-            sheet.PageSetup.Zoom = False
+            # ===== PAGE SETUP FOR PROPER PDF LAYOUT =====
+            page_setup = sheet.PageSetup
             
-            # Export to PDF (0 = xlTypePDF)
-            workbook.ExportAsFixedFormat(0, pdf_path)
+            # Set landscape orientation (2 = xlLandscape, 1 = xlPortrait)
+            page_setup.Orientation = 2  # Landscape
+            
+            # Set paper size (1 = xlPaperLetter)
+            page_setup.PaperSize = 1
+            
+            # Fit all columns to one page width
+            page_setup.Zoom = False  # Disable zoom to use FitToPages
+            page_setup.FitToPagesWide = 1  # Fit to 1 page wide
+            page_setup.FitToPagesTall = False  # Allow multiple pages tall
+            
+            # Set narrow margins (in inches)
+            page_setup.LeftMargin = excel.InchesToPoints(0.25)
+            page_setup.RightMargin = excel.InchesToPoints(0.25)
+            page_setup.TopMargin = excel.InchesToPoints(0.5)
+            page_setup.BottomMargin = excel.InchesToPoints(0.5)
+            page_setup.HeaderMargin = excel.InchesToPoints(0.3)
+            page_setup.FooterMargin = excel.InchesToPoints(0.3)
+            
+            # Center content horizontally on page
+            page_setup.CenterHorizontally = True
+            page_setup.CenterVertically = False
+            
+            # Repeat header rows on each printed page (rows 1-6)
+            page_setup.PrintTitleRows = "$1:$6"
+            
+            # Set print area to all used cells
+            used_range = sheet.UsedRange
+            if used_range:
+                page_setup.PrintArea = used_range.Address
+            
+            # Print gridlines = False for cleaner look
+            page_setup.PrintGridlines = False
+            
+            # Export to PDF (0 = xlTypePDF, 1 = xlQualityStandard)
+            # Parameters: Type, Filename, Quality, IncludeDocProperties, IgnorePrintAreas
+            workbook.ExportAsFixedFormat(
+                Type=0,  # xlTypePDF
+                Filename=pdf_path,
+                Quality=0,  # xlQualityStandard
+                IncludeDocProperties=True,
+                IgnorePrintAreas=False,  # Respect print area
+                OpenAfterPublish=False
+            )
             
             print(f"[SUCCESS] PDF generated successfully (Excel/win32): {pdf_file}")
             
         finally:
             # Close workbook and quit Excel
+            if workbook:
+                try:
+                    workbook.Close(SaveChanges=False)
+                except:
+                    pass
+            
             try:
-                workbook.Close(SaveChanges=False)
+                excel.Quit()
             except:
                 pass
-            excel.Quit()
             
             # Release COM objects
-            del workbook
+            if workbook:
+                del workbook
             del excel
             
             # Small delay to ensure Excel process terminates

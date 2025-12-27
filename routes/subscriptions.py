@@ -523,6 +523,7 @@ async def get_dashboard_analytics(realm_id: str, db: Session = Depends(get_db)):
                     "total_payment_summary": total_payment_reports,
                     "total": total_rvcr_reports + total_payment_reports,
                     "this_month": reports_this_month,
+                    "last_month": last_month_reports,
                     "trend_percent": reports_trend,
                     "last_generated": last_report.generated_at.isoformat() if last_report else None,
                 },

@@ -491,7 +491,8 @@ async def generate_rvcr_report(
             file_data=excel_bytes,
             client_id=realm_id,
             license_id=franchise_number,
-            file_name=report_name,  # e.g., "01444 - 082024 RVCR"
+            # file_name=report_name,  # e.g., "01444 - 082024 RVCR"
+            report_type=report_name,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             ext="xlsx"
         )
@@ -509,7 +510,8 @@ async def generate_rvcr_report(
                 file_data=pdf_bytes,
                 client_id=realm_id,
                 license_id=franchise_number,
-                file_name=report_name,  # e.g., "01444 - 082024 RVCR"
+                # file_name=report_name,  # e.g., "01444 - 082024 RVCR"
+                report_type=report_name,
                 content_type="application/pdf",
                 ext="pdf"
             )

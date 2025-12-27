@@ -173,7 +173,8 @@ async def generate_payment_summary_endpoint(
             file_data=excel_bytes,
             client_id=realm_id,
             license_id=franchise_number,
-            file_name=report_name,
+            # file_name=report_name,
+            report_type=report_name,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             ext="xlsx"
         )
@@ -189,15 +190,16 @@ async def generate_payment_summary_endpoint(
                 file_data=pdf_bytes,
                 client_id=realm_id,
                 license_id=franchise_number,
-                file_name=report_name,
+                # file_name=report_name,
+                report_type=report_name,
                 content_type="application/pdf",
                 ext="pdf"
             )
             print(f"PDF uploaded: {pdf_blob_name}")
 
         # 14. Generate SAS URLs (10 year expiry)
-        excel_sas_url = storage.generate_sas_url(excel_blob_name, expiry_years=10)
-        pdf_sas_url = storage.generate_sas_url(pdf_blob_name, expiry_years=10) if pdf_blob_name else None
+        excel_sas_url = storage.generate_sas_url(excel_blob_name)
+        pdf_sas_url = storage.generate_sas_url(pdf_blob_name) if pdf_blob_name else None
 
         # 15. Save to database
         # Format period_month as "mmyyyy" string (matching RVCR format)
@@ -346,8 +348,8 @@ async def list_payment_summaries(
 
     result = []
     for report in reports:
-        excel_url = storage.generate_sas_url(report.excel_blob_name, expiry_years=10) if report.excel_blob_name else None
-        pdf_url = storage.generate_sas_url(report.pdf_blob_name, expiry_years=10) if report.pdf_blob_name else None
+        excel_url = storage.generate_sas_url(report.excel_blob_name) if report.excel_blob_name else None
+        pdf_url = storage.generate_sas_url(report.pdf_blob_name) if report.pdf_blob_name else None
 
         # Parse period_month (mmyyyy format) for display
         pm = report.period_month or ""
@@ -393,8 +395,8 @@ async def get_payment_summary(
 
     storage = AzureStorageService()
 
-    excel_url = storage.generate_sas_url(report.excel_blob_name, expiry_years=10) if report.excel_blob_name else None
-    pdf_url = storage.generate_sas_url(report.pdf_blob_name, expiry_years=10) if report.pdf_blob_name else None
+    excel_url = storage.generate_sas_url(report.excel_blob_name) if report.excel_blob_name else None
+    pdf_url = storage.generate_sas_url(report.pdf_blob_name) if report.pdf_blob_name else None
 
     # Parse period_month (mmyyyy format) for display
     pm = report.period_month or ""
