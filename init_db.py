@@ -3,11 +3,11 @@ from db import engine
 from models import Base
 from seed_plans import seed_plans
 
-print("🔄 Creating database tables...")
+print("Creating database tables...")
 Base.metadata.create_all(bind=engine)
-print("✅ Tables created successfully!")
+print("Tables created successfully!")
 
-print("\n🔄 Seeding plans...")
+print("\nSeeding plans...")
 seed_plans()
 
-print("\n✅ Database initialization complete!")
+print("\nDatabase initialization complete!")

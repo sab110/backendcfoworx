@@ -8,7 +8,7 @@ def seed_plans():
     # Check if plans already exist
     existing_plans = db.query(Plan).count()
     if existing_plans > 0:
-        print(f"✅ Plans already exist ({existing_plans} plans found). Skipping seed.")
+        print(f"Plans already exist ({existing_plans} plans found). Skipping seed.")
         db.close()
         return
     
@@ -59,7 +59,7 @@ def seed_plans():
             db.add(plan)
         
         db.commit()
-        print(f"✅ Successfully seeded {len(plans_data)} plans!")
+        print(f"Successfully seeded {len(plans_data)} plans!")
         
         # Display created plans
         all_plans = db.query(Plan).all()
@@ -68,7 +68,7 @@ def seed_plans():
     
     except Exception as e:
         db.rollback()
-        print(f"❌ Error seeding plans: {e}")
+        print(f"Error seeding plans: {e}")
     finally:
         db.close()
 

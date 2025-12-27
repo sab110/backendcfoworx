@@ -7,7 +7,7 @@ from azure.storage.blob import (
     generate_blob_sas,
     BlobSasPermissions,
 )
-from config import AZURE_STORAGE_CONNECTION_STRING,AZURE_STORAGE_CONTAINER_NAME
+from config import AZURE_STORAGE_CONNECTION_STRING, AZURE_STORAGE_CONTAINER_NAME
 from azure.core.exceptions import ResourceNotFoundError
 
 
@@ -17,19 +17,19 @@ class AzureStorageService:
     -------------------------------------------------------
     Implements all report storage and retrieval features as
     defined in:
-      • SOW §6.1.1, §6.2, §6.6.2
-      • FRD §6.11, §6.17, §6.18, §6.23, §9
+    • SOW §6.1.1, §6.2, §6.6.2
+    • FRD §6.11, §6.17, §6.18, §6.23, §9
 
     Handles:
-      - Upload (PDF/CSV reports)
-      - Tenant-based folder organization
-      - Secure SAS-based download URLs
-      - Listing & Deletion for admin dashboards
+    - Upload (PDF/CSV reports)
+    - Tenant-based folder organization
+    - Secure SAS-based download URLs
+    - Listing & Deletion for admin dashboards
     """
 
     def __init__(self, container_name: str = "reports"):
         if not AZURE_STORAGE_CONNECTION_STRING:
-            raise ValueError("❌ Missing AZURE_STORAGE_CONNECTION_STRING in environment variables.")
+            raise ValueError("Missing AZURE_STORAGE_CONNECTION_STRING in environment variables.")
 
         self.container_name = AZURE_STORAGE_CONTAINER_NAME
         self.blob_service_client = BlobServiceClient.from_connection_string(
@@ -43,18 +43,19 @@ class AzureStorageService:
     def _ensure_container(self):
         try:
             container_client = self.blob_service_client.get_container_client(self.container_name)
-            
+
             # Try to get the container properties to check if it exists
             try:
                 container_client.get_container_properties()  # Will raise ResourceNotFoundError if not exists
             except ResourceNotFoundError:
                 # Container doesn't exist, so create it
                 container_client.create_container()
-                print(f"✅ Created container: {self.container_name}")
-            
+                print(f"Created container: {self.container_name}")
+
             return container_client
         except Exception as e:
-            raise RuntimeError(f"⚠️ Failed to create/get container: {e}")
+            raise RuntimeError(f"Failed to create/get container: {e}")
+
     # -----------------------------------------------------------------
     # Standardized blob naming convention per FRD §6.11
     # Format: {client_id}/{franchise_number}/{file_name}.{ext}
@@ -62,7 +63,7 @@ class AzureStorageService:
     def _generate_blob_name(self, client_id: str, license_id: str, file_name: str, ext: str):
         """
         Generate blob name with format: {client_id}/{license_id}/{file_name}.{ext}
-        
+
         Args:
             client_id: The realm_id / client identifier
             license_id: The franchise number
@@ -89,8 +90,8 @@ class AzureStorageService:
         """
         Uploads file bytes to Azure Blob Storage.
         Stores using structured tenant paths:
-          {client_id}/{license_id}/{file_name}.{ext}
-        
+        {client_id}/{license_id}/{file_name}.{ext}
+
         Args:
             client_id: The realm_id / client identifier
             license_id: The franchise number
@@ -109,7 +110,7 @@ class AzureStorageService:
             )
 
             blob_url = blob_client.url
-            print(f"✅ Uploaded {file_name}.{ext} for client {client_id} → {blob_url}")
+            print(f"Uploaded {file_name}.{ext} for client {client_id} -> {blob_url}")
             return blob_url, blob_name
         except Exception as e:
             raise RuntimeError(f"Upload failed for {file_name}: {e}")
@@ -139,7 +140,7 @@ class AzureStorageService:
             )
 
             sas_url = f"https://{account_name}.blob.core.windows.net/{self.container_name}/{blob_name}?{sas_token}"
-            print(f"🔐 SAS URL generated (expires in {expiry_years} years)")
+            print(f"SAS URL generated (expires in {expiry_years} years)")
             return sas_url
         except Exception as e:
             raise RuntimeError(f"SAS generation failed: {e}")
@@ -189,7 +190,7 @@ class AzureStorageService:
         try:
             blob_client = self.container_client.get_blob_client(blob_name)
             blob_client.delete_blob()
-            print(f"🗑️ Deleted blob {blob_name}")
+            print(f"Deleted blob {blob_name}")
             return True
         except Exception as e:
             raise RuntimeError(f"Delete failed for {blob_name}: {e}")

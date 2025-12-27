@@ -16,13 +16,13 @@ async def get_company_subscription(realm_id: str, db: Session = Depends(get_db))
         .filter(Subscription.realm_id == realm_id)
         .first()
     )
-    
+
     if not subscription:
         return {
             "status": "no_subscription",
             "message": "No active subscription found for this company"
         }
-    
+
     # Get plan details if plan_id exists
     plan_details = None
     if subscription.plan_id:
@@ -35,7 +35,7 @@ async def get_company_subscription(realm_id: str, db: Session = Depends(get_db))
                 "price": plan.price,
                 "stripe_price_id": plan.stripe_price_id
             }
-    
+
     # Get company details
     company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == realm_id).first()
     company_details = None
@@ -45,7 +45,7 @@ async def get_company_subscription(realm_id: str, db: Session = Depends(get_db))
             "company_name": company.company_name,
             "email": company.email
         }
-    
+
     return {
         "id": subscription.id,
         "realm_id": subscription.realm_id,
@@ -67,7 +67,7 @@ async def get_all_plans(db: Session = Depends(get_db)):
     Get all available pricing plans
     """
     plans = db.query(Plan).all()
-    
+
     result = []
     for plan in plans:
         result.append({
@@ -77,7 +77,7 @@ async def get_all_plans(db: Session = Depends(get_db)):
             "price": plan.price,
             "stripe_price_id": plan.stripe_price_id
         })
-    
+
     return {"plans": result}
 
 
@@ -89,7 +89,7 @@ async def link_stripe_subscription(
     """
     Manually link a Stripe subscription to a company.
     Useful when webhook fails to create the subscription automatically.
-    
+
     Payload:
     {
         "stripe_subscription_id": "sub_xxx",
@@ -99,18 +99,18 @@ async def link_stripe_subscription(
     import stripe
     from config import STRIPE_SECRET_KEY
     from datetime import datetime
-    
+
     stripe.api_key = STRIPE_SECRET_KEY
-    
+
     stripe_subscription_id = payload.get("stripe_subscription_id")
     realm_id = payload.get("realm_id")
-    
+
     if not stripe_subscription_id or not realm_id:
         raise HTTPException(
             status_code=400,
             detail="Both stripe_subscription_id and realm_id are required"
         )
-    
+
     # Verify company exists
     company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == realm_id).first()
     if not company:
@@ -118,51 +118,51 @@ async def link_stripe_subscription(
             status_code=404,
             detail=f"Company not found for realm_id: {realm_id}"
         )
-    
+
     try:
         # Fetch subscription from Stripe
         stripe_sub = stripe.Subscription.retrieve(stripe_subscription_id)
-        
+
         stripe_price_id = stripe_sub["items"]["data"][0]["price"]["id"]
         status = stripe_sub.get("status", "unknown")
         stripe_customer_id = stripe_sub.get("customer")
-        
+
         # Parse dates correctly from Stripe
-        print(f"📋 Stripe subscription data:")
-        print(f"   ID: {stripe_sub.get('id')}")
-        print(f"   Status: {stripe_sub.get('status')}")
-        print(f"   start_date: {stripe_sub.get('start_date')}")
-        print(f"   created: {stripe_sub.get('created')}")
-        print(f"   current_period_end: {stripe_sub.get('current_period_end')}")
-        print(f"   current_period_start: {stripe_sub.get('current_period_start')}")
-        
+        print(f"Stripe subscription data:")
+        print(f"  ID: {stripe_sub.get('id')}")
+        print(f"  Status: {stripe_sub.get('status')}")
+        print(f"  start_date: {stripe_sub.get('start_date')}")
+        print(f"  created: {stripe_sub.get('created')}")
+        print(f"  current_period_end: {stripe_sub.get('current_period_end')}")
+        print(f"  current_period_start: {stripe_sub.get('current_period_start')}")
+
         start_timestamp = stripe_sub.get("start_date") or stripe_sub.get("created")
         end_timestamp = stripe_sub.get("current_period_end")
-        
+
         if not start_timestamp:
             raise HTTPException(
                 status_code=500,
                 detail="Stripe subscription missing start_date and created timestamp"
             )
-        
+
         start_date = datetime.utcfromtimestamp(start_timestamp)
-        
+
         # If current_period_end is missing, calculate it from billing interval
         if not end_timestamp:
-            print(f"⚠️  current_period_end missing, calculating from billing interval...")
-            
+            print(f"  current_period_end missing, calculating from billing interval...")
+
             # Get billing interval from price
             price = stripe_sub["items"]["data"][0]["price"]
             if price.get("recurring"):
                 interval = price["recurring"]["interval"]  # 'month', 'year', 'week', 'day'
                 interval_count = price["recurring"].get("interval_count", 1)
-                
-                print(f"   Billing: {interval_count} {interval}(s)")
-                
+
+                print(f"  Billing: {interval_count} {interval}(s)")
+
                 # Calculate end date
                 from dateutil.relativedelta import relativedelta
                 from datetime import timedelta
-                
+
                 if interval == 'month':
                     end_date = start_date + relativedelta(months=interval_count)
                 elif interval == 'year':
@@ -176,8 +176,8 @@ async def link_stripe_subscription(
                         status_code=500,
                         detail=f"Unknown billing interval: {interval}"
                     )
-                
-                print(f"   Calculated end_date: {end_date}")
+
+                print(f"  Calculated end_date: {end_date}")
             else:
                 raise HTTPException(
                     status_code=500,
@@ -185,24 +185,24 @@ async def link_stripe_subscription(
                 )
         else:
             end_date = datetime.utcfromtimestamp(end_timestamp)
-        
-        print(f"📅 Parsed dates:")
-        print(f"   Start: {start_date} (timestamp: {start_timestamp})")
-        print(f"   End: {end_date} (timestamp: {end_timestamp})")
-        
+
+        print(f"Parsed dates:")
+        print(f"  Start: {start_date} (timestamp: {start_timestamp})")
+        print(f"  End: {end_date} (timestamp: {end_timestamp})")
+
         # Get quantity from subscription
         quantity = stripe_sub["items"]["data"][0]["quantity"] if stripe_sub.get("items") and stripe_sub["items"].get("data") else 1
-        print(f"   Quantity: {quantity} licenses")
-        
+        print(f"  Quantity: {quantity} licenses")
+
         # Find plan by stripe_price_id
         plan = db.query(Plan).filter(Plan.stripe_price_id == stripe_price_id).first()
         plan_id = plan.id if plan else None
-        
+
         # Check if subscription already exists
         existing = db.query(Subscription).filter(
             Subscription.realm_id == realm_id
         ).first()
-        
+
         if existing:
             # Update existing
             existing.stripe_subscription_id = stripe_subscription_id
@@ -227,9 +227,9 @@ async def link_stripe_subscription(
             )
             db.add(new_subscription)
             message = "Subscription created"
-        
+
         db.commit()
-        
+
         return {
             "message": f"{message} and linked to company successfully",
             "realm_id": realm_id,
@@ -241,7 +241,7 @@ async def link_stripe_subscription(
             "start_date": start_date.isoformat() if start_date else None,
             "end_date": end_date.isoformat() if end_date else None
         }
-    
+
     except Exception as e:
         db.rollback()
         # Check if it's a Stripe error
@@ -272,18 +272,18 @@ async def delete_account(realm_id: str, db: Session = Depends(get_db)):
     """
     import stripe
     from config import STRIPE_SECRET_KEY
-    
+
     stripe.api_key = STRIPE_SECRET_KEY
-    
+
     # 1. Check if company exists
     company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == realm_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
-    
+
     # Get the QuickBooks token to find the user
     token = db.query(QuickBooksToken).filter(QuickBooksToken.realm_id == realm_id).first()
     user_id = token.user_id if token else None
-    
+
     deleted_items = {
         "stripe_subscription_cancelled": False,
         "email_preferences": 0,
@@ -294,7 +294,7 @@ async def delete_account(realm_id: str, db: Session = Depends(get_db)):
         "token": False,
         "user": False,
     }
-    
+
     try:
         # 2. Cancel Stripe subscription if exists
         subscription = db.query(Subscription).filter(Subscription.realm_id == realm_id).first()
@@ -302,73 +302,72 @@ async def delete_account(realm_id: str, db: Session = Depends(get_db)):
             try:
                 stripe.Subscription.cancel(subscription.stripe_subscription_id)
                 deleted_items["stripe_subscription_cancelled"] = True
-                print(f"✅ Cancelled Stripe subscription: {subscription.stripe_subscription_id}")
+                print(f"Cancelled Stripe subscription: {subscription.stripe_subscription_id}")
             except stripe.error.InvalidRequestError as e:
                 # Subscription might already be cancelled
-                print(f"⚠️ Stripe subscription already cancelled or invalid: {e}")
+                print(f"Stripe subscription already cancelled or invalid: {e}")
                 deleted_items["stripe_subscription_cancelled"] = True
             except Exception as e:
-                print(f"⚠️ Error cancelling Stripe subscription: {e}")
-        
+                print(f"Error cancelling Stripe subscription: {e}")
+
         # 3. Delete email preferences
         email_prefs = db.query(EmailPreference).filter(EmailPreference.realm_id == realm_id).all()
         deleted_items["email_preferences"] = len(email_prefs)
         for pref in email_prefs:
             db.delete(pref)
-        
+
         # 4. Delete email logs
         email_logs = db.query(EmailLog).filter(EmailLog.realm_id == realm_id).all()
         deleted_items["email_logs"] = len(email_logs)
         for log in email_logs:
             db.delete(log)
-        
+
         # 5. Delete license mappings
         mappings = db.query(CompanyLicenseMapping).filter(CompanyLicenseMapping.realm_id == realm_id).all()
         deleted_items["license_mappings"] = len(mappings)
         for mapping in mappings:
             db.delete(mapping)
-        
+
         # 6. Delete subscription
         if subscription:
             db.delete(subscription)
             deleted_items["subscription"] = True
-        
+
         # 7. Delete company info
         db.delete(company)
         deleted_items["company"] = True
-        
+
         # 8. Delete QuickBooks token
         if token:
             db.delete(token)
             deleted_items["token"] = True
-        
+
         # 9. Delete user (if no other tokens exist for this user)
         if user_id:
             other_tokens = db.query(QuickBooksToken).filter(
                 QuickBooksToken.user_id == user_id,
                 QuickBooksToken.realm_id != realm_id
             ).first()
-            
+
             if not other_tokens:
                 user = db.query(User).filter(User.id == user_id).first()
                 if user:
                     db.delete(user)
                     deleted_items["user"] = True
-        
+
         db.commit()
-        
+
         return {
             "success": True,
             "message": "Account deleted successfully",
             "realm_id": realm_id,
             "deleted_items": deleted_items,
         }
-    
+
     except Exception as e:
         db.rollback()
-        print(f"❌ Error deleting account: {str(e)}")
+        print(f"Error deleting account: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Error deleting account: {str(e)}"
         )
-

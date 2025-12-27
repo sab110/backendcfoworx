@@ -35,5 +35,5 @@ def connect_postgres():
         cursor.close()
         return cnx
     except Exception as e:
-        print(f"❌ PostgreSQL connection error: {e}")
+        print(f"PostgreSQL connection error: {e}")
         raise

@@ -10,20 +10,20 @@ def seed_licenses():
     db = SessionLocal()
     
     try:
-        print("🔄 Loading licenses from data.csv...\n")
+        print("Loading licenses from data.csv...\n")
         
         # Check if licenses already exist
         existing_count = db.query(License).count()
         if existing_count > 0:
-            print(f"⚠️  Found {existing_count} existing licenses in database")
+            print(f"Found {existing_count} existing licenses in database")
             response = input("Do you want to clear and re-import? (yes/no): ")
             if response.lower() == 'yes':
-                print("🗑️  Clearing existing licenses...")
+                print("Clearing existing licenses...")
                 db.query(License).delete()
                 db.commit()
-                print("✅ Existing licenses cleared")
+                print("Existing licenses cleared")
             else:
-                print("✅ Keeping existing licenses, skipping import")
+                print("Keeping existing licenses, skipping import")
                 return
         
         # Read and import licenses from CSV
@@ -64,23 +64,23 @@ def seed_licenses():
         # Final commit
         db.commit()
         
-        print(f"\n✅ License import complete!")
+        print(f"\nLicense import complete!")
         print(f"   - Added: {licenses_added} licenses")
         if licenses_skipped > 0:
             print(f"   - Skipped: {licenses_skipped} (missing franchise number)")
         
         # Show sample
-        print("\n📋 Sample licenses:")
+        print("\nSample licenses:")
         sample_licenses = db.query(License).limit(5).all()
         for lic in sample_licenses:
             print(f"   {lic.franchise_number}: {lic.name} ({lic.city}, {lic.state})")
         
     except FileNotFoundError:
-        print("❌ Error: data.csv file not found!")
+        print("Error: data.csv file not found!")
         print("   Please ensure data.csv is in the same directory as this script")
     except Exception as e:
         db.rollback()
-        print(f"❌ Error importing licenses: {e}")
+        print(f"Error importing licenses: {e}")
         raise
     finally:
         db.close()

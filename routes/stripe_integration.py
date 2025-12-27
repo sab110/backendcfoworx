@@ -17,20 +17,20 @@ def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_d
     """
     Helper to send subscription-related emails.
     email_type: 'subscription_created', 'subscription_renewed', 'subscription_canceled', 'payment_failed'
-    
+
     Sends to USER email (the person who logged in), not company email.
     """
     try:
         from services.email_service import email_service
-        
+
         # Get company info
         company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == realm_id).first()
         if not company:
-            print(f"⚠️ Cannot send email: Company not found for realm_id {realm_id}")
+            print(f"Cannot send email: Company not found for realm_id {realm_id}")
             return False
-        
+
         company_name = company.company_name or "Your Company"
-        
+
         # First, try to get the USER email (the person who signed in)
         qb_token = db.query(QuickBooksToken).filter(QuickBooksToken.realm_id == realm_id).first()
         user_email = None
@@ -38,33 +38,33 @@ def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_d
             user = db.query(User).filter(User.id == qb_token.user_id).first()
             if user and user.email:
                 user_email = user.email
-                print(f"📧 Found user email: {user_email}")
-        
+                print(f"Found user email: {user_email}")
+
         # Get email preference recipients (for those who want billing emails)
         email_prefs = db.query(EmailPreference).filter(
             EmailPreference.realm_id == realm_id,
             EmailPreference.receive_billing == "true"
         ).all()
-        
+
         recipients = [pref.email for pref in email_prefs]
-        
+
         # Add user email if not already in recipients
         if user_email and user_email not in recipients:
             recipients.insert(0, user_email)  # Put user email first
-        
+
         # Fallback to company email if no recipients found
         if not recipients:
             if company.email:
                 recipients = [company.email]
             elif company.customer_communication_email:
                 recipients = [company.customer_communication_email]
-        
+
         if not recipients:
-            print(f"⚠️ No email recipients found for realm_id {realm_id}")
+            print(f"No email recipients found for realm_id {realm_id}")
             return False
-        
-        print(f"📧 Sending {email_type} email to: {recipients}")
-        
+
+        print(f"Sending {email_type} email to: {recipients}")
+
         # Send appropriate email based on type
         if email_type == "subscription_created":
             result = email_service.send_billing_notification(
@@ -79,68 +79,68 @@ def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_d
             # Professional cancellation email
             subject = "CFO Worx Subscription Canceled"
             html = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            </head>
-            <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f5f5f5;">
-                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-                    <div style="background-color: #1a365d; padding: 30px; text-align: center;">
-                        <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
-                            CFO Worx
-                        </h1>
-                    </div>
-                    <div style="background-color: #ffffff; padding: 40px 30px; border: 1px solid #e0e0e0; border-top: none;">
-                        <h2 style="color: #1a365d; font-size: 20px; font-weight: 600; margin: 0 0 20px 0;">
-                            Subscription Cancellation Confirmed
-                        </h2>
-                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
-                            Dear {company_name} Team,
-                        </p>
-                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
-                            Your CFO Worx subscription has been canceled as requested.
-                        </p>
-                        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-                            <tr>
-                                <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666; width: 140px;">
-                                    <strong>Status</strong>
-                                </td>
-                                <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #991b1b; font-weight: 600;">
-                                    CANCELED
-                                </td>
-                            </tr>
-                        </table>
-                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 20px 0;">
-                            You will continue to have access to premium features until the end of your current billing period. 
-                            After that, your account will revert to the free tier.
-                        </p>
-                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
-                            If you would like to reactivate your subscription, you can do so at any time from your dashboard.
-                        </p>
-                        <div style="text-align: center; margin: 30px 0;">
-                            <a href="{FRONTEND_URL}/subscribe" 
-                               style="display: inline-block; background-color: #1a365d; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 4px; font-weight: 600; font-size: 14px;">
-                                Reactivate Subscription
-                            </a>
-                        </div>
-                        <p style="color: #666666; font-size: 13px; line-height: 1.6; margin: 20px 0 0 0;">
-                            If you have questions regarding your account, please contact our support team.
-                        </p>
-                    </div>
-                    <div style="padding: 20px; text-align: center; border: 1px solid #e0e0e0; border-top: none; background-color: #fafafa;">
-                        <p style="color: #666666; font-size: 12px; margin: 0 0 5px 0;">
-                            CFO Worx - Royalty Management Solutions
-                        </p>
-                        <p style="color: #999999; font-size: 11px; margin: 0;">
-                            This is an automated message. Please do not reply directly to this email.
-                        </p>
-                    </div>
-                </div>
-            </body>
-            </html>
-            """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f5f5f5;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+        <div style="background-color: #1a365d; padding: 30px; text-align: center;">
+            <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
+                CFO Worx
+            </h1>
+        </div>
+        <div style="background-color: #ffffff; padding: 40px 30px; border: 1px solid #e0e0e0; border-top: none;">
+            <h2 style="color: #1a365d; font-size: 20px; font-weight: 600; margin: 0 0 20px 0;">
+                Subscription Cancellation Confirmed
+            </h2>
+            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                Dear {company_name} Team,
+            </p>
+            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                Your CFO Worx subscription has been canceled as requested.
+            </p>
+            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                <tr>
+                    <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666; width: 140px;">
+                        <strong>Status</strong>
+                    </td>
+                    <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #991b1b; font-weight: 600;">
+                        CANCELED
+                    </td>
+                </tr>
+            </table>
+            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 20px 0;">
+                You will continue to have access to premium features until the end of your current billing period. 
+                After that, your account will revert to the free tier.
+            </p>
+            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                If you would like to reactivate your subscription, you can do so at any time from your dashboard.
+            </p>
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{FRONTEND_URL}/subscribe" 
+                   style="display: inline-block; background-color: #1a365d; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 4px; font-weight: 600; font-size: 14px;">
+                    Reactivate Subscription
+                </a>
+            </div>
+            <p style="color: #666666; font-size: 13px; line-height: 1.6; margin: 20px 0 0 0;">
+                If you have questions regarding your account, please contact our support team.
+            </p>
+        </div>
+        <div style="padding: 20px; text-align: center; border: 1px solid #e0e0e0; border-top: none; background-color: #fafafa;">
+            <p style="color: #666666; font-size: 12px; margin: 0 0 5px 0;">
+                CFO Worx - Royalty Management Solutions
+            </p>
+            <p style="color: #999999; font-size: 11px; margin: 0;">
+                This is an automated message. Please do not reply directly to this email.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+"""
             result = email_service.send_email(
                 to=recipients,
                 subject=subject,
@@ -174,80 +174,80 @@ def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_d
             status_color = '#166534' if status_value == 'active' else '#92400e'
             subject = "CFO Worx Subscription Updated"
             html = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            </head>
-            <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f5f5f5;">
-                <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-                    <div style="background-color: #1a365d; padding: 30px; text-align: center;">
-                        <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
-                            CFO Worx
-                        </h1>
-                    </div>
-                    <div style="background-color: #ffffff; padding: 40px 30px; border: 1px solid #e0e0e0; border-top: none;">
-                        <h2 style="color: #1a365d; font-size: 20px; font-weight: 600; margin: 0 0 20px 0;">
-                            Subscription Updated
-                        </h2>
-                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
-                            Dear {company_name} Team,
-                        </p>
-                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
-                            Your CFO Worx subscription has been updated. Please review the details below.
-                        </p>
-                        <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-                            <tr>
-                                <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666; width: 140px;">
-                                    <strong>Plan</strong>
-                                </td>
-                                <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #333333;">
-                                    {details.get('plan', 'N/A')}
-                                </td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666;">
-                                    <strong>Licenses</strong>
-                                </td>
-                                <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #333333;">
-                                    {details.get('quantity', 1)}
-                                </td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666;">
-                                    <strong>Status</strong>
-                                </td>
-                                <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: {status_color}; font-weight: 600;">
-                                    {status_value.upper()}
-                                </td>
-                            </tr>
-                        </table>
-                        <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 20px 0;">
-                            You can view and manage your subscription from your dashboard at any time.
-                        </p>
-                        <div style="text-align: center; margin: 30px 0;">
-                            <a href="{FRONTEND_URL}/dashboard" 
-                               style="display: inline-block; background-color: #1a365d; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 4px; font-weight: 600; font-size: 14px;">
-                                Go to Dashboard
-                            </a>
-                        </div>
-                        <p style="color: #666666; font-size: 13px; line-height: 1.6; margin: 20px 0 0 0;">
-                            If you have questions regarding your subscription, please contact our support team.
-                        </p>
-                    </div>
-                    <div style="padding: 20px; text-align: center; border: 1px solid #e0e0e0; border-top: none; background-color: #fafafa;">
-                        <p style="color: #666666; font-size: 12px; margin: 0 0 5px 0;">
-                            CFO Worx - Royalty Management Solutions
-                        </p>
-                        <p style="color: #999999; font-size: 11px; margin: 0;">
-                            This is an automated message. Please do not reply directly to this email.
-                        </p>
-                    </div>
-                </div>
-            </body>
-            </html>
-            """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f5f5f5;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+        <div style="background-color: #1a365d; padding: 30px; text-align: center;">
+            <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
+                CFO Worx
+            </h1>
+        </div>
+        <div style="background-color: #ffffff; padding: 40px 30px; border: 1px solid #e0e0e0; border-top: none;">
+            <h2 style="color: #1a365d; font-size: 20px; font-weight: 600; margin: 0 0 20px 0;">
+                Subscription Updated
+            </h2>
+            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                Dear {company_name} Team,
+            </p>
+            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                Your CFO Worx subscription has been updated. Please review the details below.
+            </p>
+            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                <tr>
+                    <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666; width: 140px;">
+                        <strong>Plan</strong>
+                    </td>
+                    <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #333333;">
+                        {details.get('plan', 'N/A')}
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666;">
+                        <strong>Licenses</strong>
+                    </td>
+                    <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #333333;">
+                        {details.get('quantity', 1)}
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666;">
+                        <strong>Status</strong>
+                    </td>
+                    <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: {status_color}; font-weight: 600;">
+                        {status_value.upper()}
+                    </td>
+                </tr>
+            </table>
+            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 20px 0;">
+                You can view and manage your subscription from your dashboard at any time.
+            </p>
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{FRONTEND_URL}/dashboard" 
+                   style="display: inline-block; background-color: #1a365d; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 4px; font-weight: 600; font-size: 14px;">
+                    Go to Dashboard
+                </a>
+            </div>
+            <p style="color: #666666; font-size: 13px; line-height: 1.6; margin: 20px 0 0 0;">
+                If you have questions regarding your subscription, please contact our support team.
+            </p>
+        </div>
+        <div style="padding: 20px; text-align: center; border: 1px solid #e0e0e0; border-top: none; background-color: #fafafa;">
+            <p style="color: #666666; font-size: 12px; margin: 0 0 5px 0;">
+                CFO Worx - Royalty Management Solutions
+            </p>
+            <p style="color: #999999; font-size: 11px; margin: 0;">
+                This is an automated message. Please do not reply directly to this email.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+"""
             result = email_service.send_email(
                 to=recipients,
                 subject=subject,
@@ -257,23 +257,23 @@ def send_subscription_email(db: Session, realm_id: str, email_type: str, extra_d
                 email_type="billing",
             )
         else:
-            print(f"⚠️ Unknown email type: {email_type}")
+            print(f"Unknown email type: {email_type}")
             return False
-        
+
         if result.get("success"):
-            print(f"✅ {email_type} email sent successfully")
+            print(f"{email_type} email sent successfully")
             return True
         else:
-            print(f"❌ Failed to send {email_type} email: {result.get('error')}")
+            print(f"Failed to send {email_type} email: {result.get('error')}")
             return False
-            
+
     except Exception as e:
-        print(f"❌ Error sending {email_type} email: {str(e)}")
+        print(f"Error sending {email_type} email: {str(e)}")
         return False
 
 
 # --------------------------------------------------------------------
-#  POST /api/stripe/create-checkout-session
+# POST /api/stripe/create-checkout-session
 # --------------------------------------------------------------------
 @router.post("/create-checkout-session")
 async def create_checkout_session(request: Request):
@@ -285,23 +285,23 @@ async def create_checkout_session(request: Request):
 
     if not price_id or not email or not realm_id:
         raise HTTPException(status_code=400, detail="Missing required fields: priceId, email, realm_id")
-    
+
     # Validate quantity
     if quantity < 1:
         raise HTTPException(status_code=400, detail="Quantity must be at least 1")
-    
-    print(f"🛒 Creating checkout session:")
-    print(f"   Price ID: {price_id}")
-    print(f"   Email: {email}")
-    print(f"   Realm ID: {realm_id}")
-    print(f"   Quantity (licenses): {quantity}")
-    print(f"   Quantity type: {type(quantity)}")
+
+    print(f"Creating checkout session:")
+    print(f"  Price ID: {price_id}")
+    print(f"  Email: {email}")
+    print(f"  Realm ID: {realm_id}")
+    print(f"  Quantity (licenses): {quantity}")
+    print(f"  Quantity type: {type(quantity)}")
 
     try:
         # Ensure quantity is an integer
         quantity = int(quantity) if quantity else 1
-        print(f"   Quantity after conversion: {quantity} (type: {type(quantity)})")
-        
+        print(f"  Quantity after conversion: {quantity} (type: {type(quantity)})")
+
         session = stripe.checkout.Session.create(
             success_url=f"{FRONTEND_URL}/success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{FRONTEND_URL}/cancel",
@@ -314,24 +314,24 @@ async def create_checkout_session(request: Request):
                 "quantity": str(quantity)  # Store quantity for reference
             }
         )
-        print(f"✅ Checkout session created: {session.id}")
-        print(f"   Session URL: {session.url}")
-        print(f"   Line items: {session.line_items if hasattr(session, 'line_items') else 'Not available in response'}")
-        
+        print(f"Checkout session created: {session.id}")
+        print(f"  Session URL: {session.url}")
+        print(f"  Line items: {session.line_items if hasattr(session, 'line_items') else 'Not available in response'}")
+
         # Log what we're sending to verify
-        print(f"📦 Stripe checkout configured with:")
-        print(f"   - Price: {price_id}")
-        print(f"   - Quantity: {quantity}")
-        print(f"   - Total: ${quantity} × price")
-        
+        print(f"Stripe checkout configured with:")
+        print(f"  - Price: {price_id}")
+        print(f"  - Quantity: {quantity}")
+        print(f"  - Total: ${quantity} x price")
+
         return {"url": session.url, "session_id": session.id}
     except Exception as e:
-        print(f"❌ Error creating checkout session: {str(e)}")
+        print(f"Error creating checkout session: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # --------------------------------------------------------------------
-#  POST /api/stripe/create-customer-portal
+# POST /api/stripe/create-customer-portal
 # --------------------------------------------------------------------
 @router.post("/create-customer-portal")
 async def create_customer_portal(request: Request):
@@ -342,68 +342,20 @@ async def create_customer_portal(request: Request):
         raise HTTPException(status_code=400, detail="Missing customerId")
 
     try:
-        # Load the portal configuration ID from environment
-        # portal_config_id = os.getenv("STRIPE_PORTAL_CONFIGURATION_ID")
-
         # Create a billing portal session
         portal_session = stripe.billing_portal.Session.create(
             customer=customer_id,
             return_url=f"{FRONTEND_URL}/dashboard",
-            # configuration=portal_config_id  
         )
         return {"url": portal_session.url}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # --------------------------------------------------------------------
-#  POST /api/stripe/webhooks — listen to billing events
+# POST /api/stripe/webhooks - listen to billing events
 # --------------------------------------------------------------------
-# @router.post("/webhooks")
-# async def stripe_webhook(request: Request):
-#     payload = await request.body()
-#     sig_header = request.headers.get("stripe-signature")
-#     event = None
-
-#     try:
-#         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
-#     except ValueError:
-#         raise HTTPException(status_code=400, detail="Invalid payload")
-#     except stripe.error.SignatureVerificationError:
-#         raise HTTPException(status_code=400, detail="Invalid signature")
-
-#     # Extract event details
-#     event_type = event["type"]
-#     data = event["data"]["object"]
-
-#     print(f"📦 Received event: {event_type}")
-
-#     # ---- Event Listeners ----
-#     if event_type == "checkout.session.completed":
-#         print(f"Checkout completed for customer: {data.get('customer_email')}")
-#         # TODO: Create new customer record in DB
-
-#     elif event_type == "customer.subscription.created":
-#         print(f"Subscription created: {data['id']}")
-#         print(f"Status: {data['status']} | Plan: {data['items']['data'][0]['price']['nickname']}")
-#         # TODO: Save subscription to DB
-
-#     elif event_type == "customer.subscription.updated":
-#         print(f"Subscription updated: {data['id']} | Status: {data['status']}")
-#         # TODO: Update local DB subscription
-
-#     elif event_type == "customer.subscription.deleted":
-#         print(f"Subscription canceled: {data['id']}")
-#         # TODO:
-
-#     elif event_type == "invoice.payment_failed":
-#         print(f"Payment failed for subscription: {data.get('subscription')}")
-
-#     elif event_type == "invoice.payment_succeeded":
-#         print(f"Payment succeeded for invoice: {data['id']}")
-
-#     return {"status": "success"}
-
 @router.post("/webhooks")
 async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     start_time = time.time()
@@ -423,19 +375,19 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     event_id = event.get("id")
     data = event["data"]["object"]
 
-    print(f"📦 Received event: {event_type}")
-    
+    print(f"Received event: {event_type}")
+
     # Get IP address from request
     client_ip = request.client.host if request.client else None
-    
+
     # Try to extract realm_id from various places in the webhook data
     initial_realm_id = None
     if data.get("metadata", {}).get("realm_id"):
         initial_realm_id = data["metadata"]["realm_id"]
-    
+
     # Log webhook received
     webhook_log = log_webhook(
-        db, 
+        db,
         source="stripe",
         event_type=event_type,
         event_id=event_id,
@@ -450,13 +402,13 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         stripe_subscription_id = data.get("subscription")  # This is the Stripe subscription ID
         stripe_customer_id = data.get("customer")
         realm_id = data.get("metadata", {}).get("realm_id")  # Get company realm_id from metadata
-        
-        print(f"✅ Checkout completed for: {customer_email} (Company realm_id: {realm_id})")
+
+        print(f"Checkout completed for: {customer_email} (Company realm_id: {realm_id})")
 
         # If no realm_id in metadata, try to find it from the user's QuickBooks token
         if not realm_id:
-            print("⚠️  No realm_id in checkout session metadata. Attempting to find via email...")
-            
+            print("No realm_id in checkout session metadata. Attempting to find via email...")
+
             # Try to find user by email and get their realm_id from QuickBooks tokens
             user = db.query(User).filter(User.email == customer_email).first()
             if user:
@@ -464,22 +416,22 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 qb_token = db.query(QuickBooksToken).filter(QuickBooksToken.user_id == user.id).first()
                 if qb_token:
                     realm_id = qb_token.realm_id
-                    print(f"✅ Found realm_id via user email: {realm_id}")
-            
-            # If still no realm_id, log warning and skip subscription creation
-            if not realm_id:
-                print(f"⚠️  Could not find realm_id for customer: {customer_email}")
-                print(f"   Subscription created in Stripe: {stripe_subscription_id}")
-                print(f"   Manual intervention required - assign subscription to company manually")
-                
-                # Don't fail the webhook, just log it
-                return {
-                    "status": "warning",
-                    "message": "Subscription created but not linked to company - missing realm_id",
-                    "stripe_subscription_id": stripe_subscription_id,
-                    "customer_email": customer_email
-                }
-        
+                    print(f"Found realm_id via user email: {realm_id}")
+
+        # If still no realm_id, log warning and skip subscription creation
+        if not realm_id:
+            print(f"Could not find realm_id for customer: {customer_email}")
+            print(f"Subscription created in Stripe: {stripe_subscription_id}")
+            print(f"Manual intervention required - assign subscription to company manually")
+
+            # Don't fail the webhook, just log it
+            return {
+                "status": "warning",
+                "message": "Subscription created but not linked to company - missing realm_id",
+                "stripe_subscription_id": stripe_subscription_id,
+                "customer_email": customer_email
+            }
+
         # Update webhook log with discovered realm_id
         if webhook_log and realm_id:
             webhook_log.realm_id = realm_id
@@ -488,11 +440,11 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         # Verify company exists
         company = db.query(CompanyInfo).filter(CompanyInfo.realm_id == realm_id).first()
         if not company:
-            print(f"⚠️  Company not found for realm_id: {realm_id}")
-            print(f"   Creating placeholder - admin should verify")
+            print(f"Company not found for realm_id: {realm_id}")
+            print(f"Creating placeholder - admin should verify")
             # Don't fail, just log
             return {
-                "status": "warning", 
+                "status": "warning",
                 "message": "Company not found in database",
                 "realm_id": realm_id
             }
@@ -504,38 +456,38 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             status = sub.get("status", "unknown")
 
             # Parse dates from Stripe subscription
-            print(f"📋 Stripe subscription dates:")
-            print(f"   start_date: {sub.get('start_date')}")
-            print(f"   created: {sub.get('created')}")
-            print(f"   current_period_start: {sub.get('current_period_start')}")
-            print(f"   current_period_end: {sub.get('current_period_end')}")
-            
+            print(f"Stripe subscription dates:")
+            print(f"  start_date: {sub.get('start_date')}")
+            print(f"  created: {sub.get('created')}")
+            print(f"  current_period_start: {sub.get('current_period_start')}")
+            print(f"  current_period_end: {sub.get('current_period_end')}")
+
             start_timestamp = sub.get("start_date") or sub.get("created")
             end_timestamp = sub.get("current_period_end")
-            
+
             if not start_timestamp:
-                print(f"⚠️  Critical: Missing start_date in Stripe subscription")
+                print(f"Critical: Missing start_date in Stripe subscription")
                 return {"status": "error", "message": "Missing start_date"}
-            
+
             start_date = datetime.utcfromtimestamp(start_timestamp)
-            
+
             # If current_period_end is missing, calculate from billing interval
             if not end_timestamp:
-                print(f"⚠️  current_period_end missing, calculating from billing interval...")
-                
+                print(f"current_period_end missing, calculating from billing interval...")
+
                 try:
                     # Get billing interval from price
                     price = sub["items"]["data"][0]["price"]
                     if price.get("recurring"):
                         interval = price["recurring"]["interval"]
                         interval_count = price["recurring"].get("interval_count", 1)
-                        
-                        print(f"   Billing: {interval_count} {interval}(s)")
-                        
+
+                        print(f"  Billing: {interval_count} {interval}(s)")
+
                         # Calculate end date
                         from dateutil.relativedelta import relativedelta
                         from datetime import timedelta as td
-                        
+
                         if interval == 'month':
                             end_date = start_date + relativedelta(months=interval_count)
                         elif interval == 'year':
@@ -545,25 +497,25 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                         elif interval == 'day':
                             end_date = start_date + td(days=interval_count)
                         else:
-                            print(f"❌ Unknown interval: {interval}")
+                            print(f"Unknown interval: {interval}")
                             return {"status": "error", "message": f"Unknown billing interval: {interval}"}
-                        
-                        print(f"   Calculated end_date: {end_date}")
+
+                        print(f"  Calculated end_date: {end_date}")
                     else:
-                        print(f"❌ Not a recurring subscription")
+                        print(f"Not a recurring subscription")
                         return {"status": "error", "message": "Not a recurring subscription"}
                 except Exception as calc_error:
-                    print(f"❌ Error calculating end_date: {str(calc_error)}")
+                    print(f"Error calculating end_date: {str(calc_error)}")
                     return {"status": "error", "message": f"Cannot calculate end_date: {str(calc_error)}"}
             else:
                 end_date = datetime.utcfromtimestamp(end_timestamp)
-            
-            print(f"📅 Subscription dates: Start={start_date}, End={end_date}")
+
+            print(f"Subscription dates: Start={start_date}, End={end_date}")
 
             # Get quantity from subscription
             quantity = sub["items"]["data"][0]["quantity"] if sub.get("items") and sub["items"].get("data") else 1
-            print(f"   Quantity: {quantity} licenses")
-            
+            print(f"  Quantity: {quantity} licenses")
+
             # Find the plan in our database by stripe_price_id
             plan = db.query(Plan).filter(Plan.stripe_price_id == stripe_price_id).first()
             plan_id = plan.id if plan else None
@@ -594,8 +546,8 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 db.add(db_subscription)
 
             db.commit()
-            print(f"💾 Subscription saved for company {company.company_name} (realm_id: {realm_id}) - Plan: {plan.name if plan else 'Unknown'} ({plan.billing_cycle if plan else 'N/A'}) × {quantity} licenses")
-            
+            print(f"Subscription saved for company {company.company_name} (realm_id: {realm_id}) - Plan: {plan.name if plan else 'Unknown'} ({plan.billing_cycle if plan else 'N/A'}) x {quantity} licenses")
+
             # Get user email for logging
             user_email_for_log = customer_email
             user_id_for_log = None
@@ -610,7 +562,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     if user_for_log:
                         user_email_for_log = user_for_log.email
                         user_id_for_log = user_for_log.id
-            
+
             # Log tenant activity
             log_tenant_activity(
                 db,
@@ -628,7 +580,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     "stripe_subscription_id": stripe_subscription_id,
                 }
             )
-            
+
             # Send subscription confirmation email
             send_subscription_email(
                 db=db,
@@ -640,42 +592,41 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                 }
             )
 
-
     elif event_type == "customer.subscription.updated":
         stripe_sub_id = data["id"]
         status = data["status"]
         stripe_price_id = data["items"]["data"][0]["price"]["id"]
-        
+
         # Check if user initiated cancellation (cancel_at_period_end)
         cancel_at_period_end = data.get("cancel_at_period_end", False)
         canceled_at = data.get("canceled_at")  # Timestamp when cancellation was initiated
 
-        print(f"🔁 Subscription updated: {stripe_sub_id} → {status}")
-        print(f"   New price: {stripe_price_id}")
-        print(f"   cancel_at_period_end: {cancel_at_period_end}")
-        print(f"   canceled_at: {canceled_at}")
+        print(f"Subscription updated: {stripe_sub_id} -> {status}")
+        print(f"  New price: {stripe_price_id}")
+        print(f"  cancel_at_period_end: {cancel_at_period_end}")
+        print(f"  canceled_at: {canceled_at}")
 
         # Fetch full subscription object to get updated dates
         sub = stripe.Subscription.retrieve(stripe_sub_id)
-        
+
         # Parse dates (same logic as checkout)
         start_timestamp = sub.get("start_date") or sub.get("created")
         end_timestamp = sub.get("current_period_end")
-        
+
         start_date = datetime.utcfromtimestamp(start_timestamp) if start_timestamp else None
-        
+
         # Calculate end_date if missing
         if not end_timestamp:
-            print(f"⚠️  current_period_end missing, calculating from billing interval...")
+            print(f"current_period_end missing, calculating from billing interval...")
             try:
                 price = sub["items"]["data"][0]["price"]
                 if price.get("recurring"):
                     interval = price["recurring"]["interval"]
                     interval_count = price["recurring"].get("interval_count", 1)
-                    
+
                     from dateutil.relativedelta import relativedelta
                     from datetime import timedelta as td
-                    
+
                     if interval == 'month':
                         end_date = start_date + relativedelta(months=interval_count)
                     elif interval == 'year':
@@ -686,20 +637,20 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                         end_date = start_date + td(days=interval_count)
                     else:
                         end_date = None
-                        print(f"❌ Unknown interval: {interval}")
+                        print(f"Unknown interval: {interval}")
                 else:
                     end_date = None
             except Exception as calc_error:
-                print(f"❌ Error calculating end_date: {str(calc_error)}")
+                print(f"Error calculating end_date: {str(calc_error)}")
                 end_date = None
         else:
             end_date = datetime.utcfromtimestamp(end_timestamp)
-        
-        print(f"📅 Updated dates: Start={start_date}, End={end_date}")
-        
+
+        print(f"Updated dates: Start={start_date}, End={end_date}")
+
         # Get quantity from subscription
         quantity = sub["items"]["data"][0]["quantity"] if sub.get("items") and sub["items"].get("data") else 1
-        print(f"   Quantity: {quantity} licenses")
+        print(f"  Quantity: {quantity} licenses")
 
         # Find plan by stripe_price_id
         plan = db.query(Plan).filter(Plan.stripe_price_id == stripe_price_id).first()
@@ -711,15 +662,15 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         if db_subscription:
             old_status = db_subscription.status
             old_quantity = db_subscription.quantity
-            
+
             # IMPORTANT: If cancel_at_period_end is true, user has initiated cancellation
             # Mark as "canceled" immediately so the UI reflects this
             if cancel_at_period_end or canceled_at:
                 effective_status = "canceled"
-                print(f"⚠️ User initiated cancellation - marking as canceled immediately")
+                print(f"User initiated cancellation - marking as canceled immediately")
             else:
                 effective_status = status
-            
+
             db_subscription.status = effective_status
             if plan:
                 db_subscription.plan_id = plan.id
@@ -730,12 +681,12 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db_subscription.quantity = quantity
             db_subscription.updated_at = datetime.utcnow()
             db.commit()
-            print(f"✅ Updated subscription: status={effective_status}, plan={plan.name if plan else 'Unknown'}, quantity={quantity}, next_billing={end_date}")
-            
+            print(f"Updated subscription: status={effective_status}, plan={plan.name if plan else 'Unknown'}, quantity={quantity}, next_billing={end_date}")
+
             # Send appropriate email based on what changed
             if cancel_at_period_end and old_status != "canceled":
                 # User just initiated cancellation - send cancellation email immediately
-                print(f"📧 Sending cancellation email (user initiated cancellation)")
+                print(f"Sending cancellation email (user initiated cancellation)")
                 send_subscription_email(
                     db=db,
                     realm_id=db_subscription.realm_id,
@@ -756,12 +707,12 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     }
                 )
         else:
-            print(f"⚠️  Subscription not found in database: {stripe_sub_id}")
+            print(f"Subscription not found in database: {stripe_sub_id}")
 
     elif event_type == "customer.subscription.deleted":
         stripe_sub_id = data["id"]
-        print(f"❌ Subscription deleted (period ended): {stripe_sub_id}")
-        
+        print(f"Subscription deleted (period ended): {stripe_sub_id}")
+
         # Mark as canceled (if not already)
         db_subscription = db.query(Subscription).filter(
             Subscription.stripe_subscription_id == stripe_sub_id
@@ -769,11 +720,11 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         if db_subscription:
             realm_id = db_subscription.realm_id
             was_already_canceled = db_subscription.status == "canceled"
-            
+
             db_subscription.status = "canceled"
             db.commit()
-            print(f"✅ Marked subscription as canceled")
-            
+            print(f"Marked subscription as canceled")
+
             # Log tenant activity for cancellation
             if not was_already_canceled:
                 # Get user email for logging
@@ -785,7 +736,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     if user_cancel:
                         user_email_cancel = user_cancel.email
                         user_id_cancel = user_cancel.id
-                
+
                 log_tenant_activity(
                     db,
                     realm_id=realm_id,
@@ -797,22 +748,22 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     ip_address=client_ip,
                     details={"stripe_subscription_id": stripe_sub_id}
                 )
-            
+
             # Only send cancellation email if we haven't already sent one
             # (we send it immediately when cancel_at_period_end is set)
             if not was_already_canceled:
-                print(f"📧 Sending cancellation email (subscription deleted)")
+                print(f"Sending cancellation email (subscription deleted)")
                 send_subscription_email(
                     db=db,
                     realm_id=realm_id,
                     email_type="subscription_canceled",
                 )
             else:
-                print(f"ℹ️ Skipping cancellation email - already sent when user initiated cancellation")
+                print(f"Skipping cancellation email - already sent when user initiated cancellation")
 
     elif event_type == "invoice.payment_failed":
-        print(f"⚠️ Payment failed for subscription: {data.get('subscription')}")
-        
+        print(f"Payment failed for subscription: {data.get('subscription')}")
+
         # Log the failed payment
         try:
             invoice_id = data.get("id")
@@ -820,12 +771,12 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             customer_id = data.get("customer")
             amount = data.get("amount_due", 0)
             currency = data.get("currency", "usd")
-            
+
             # Get failure details
             charge = data.get("charge")
             failure_code = None
             failure_message = "Payment failed"
-            
+
             if charge:
                 try:
                     charge_obj = stripe.Charge.retrieve(charge)
@@ -833,7 +784,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     failure_message = charge_obj.get("failure_message") or "Payment failed"
                 except:
                     pass
-            
+
             # Get customer email
             customer_email = data.get("customer_email")
             if not customer_email and customer_id:
@@ -842,7 +793,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     customer_email = customer.email
                 except:
                     pass
-            
+
             # Find realm_id and company name
             realm_id = None
             company_name = None
@@ -857,7 +808,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                     ).first()
                     if company:
                         company_name = company.company_name
-            
+
             # Create failed payment log
             failed_log = FailedPaymentLog(
                 realm_id=realm_id,
@@ -874,8 +825,8 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             )
             db.add(failed_log)
             db.commit()
-            print(f"📝 Logged failed payment: {invoice_id}")
-            
+            print(f"Logged failed payment: {invoice_id}")
+
             # Send payment failed email
             if realm_id:
                 send_subscription_email(
@@ -887,13 +838,13 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
                         "amount": amount,
                     }
                 )
-            
+
         except Exception as log_error:
-            print(f"❌ Error logging failed payment: {str(log_error)}")
+            print(f"Error logging failed payment: {str(log_error)}")
 
     elif event_type == "invoice.payment_succeeded":
-        print(f"💰 Payment succeeded for invoice: {data['id']}")
-        
+        print(f"Payment succeeded for invoice: {data['id']}")
+
         # Send payment success email for renewal (not for first payment which is handled by checkout.session.completed)
         subscription_id = data.get("subscription")
         if subscription_id:
@@ -901,7 +852,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             db_subscription = db.query(Subscription).filter(
                 Subscription.stripe_subscription_id == subscription_id
             ).first()
-            
+
             # Only send renewal email if subscription exists and this isn't the first payment
             billing_reason = data.get("billing_reason")
             if db_subscription and billing_reason in ["subscription_cycle", "subscription_update"]:
@@ -913,7 +864,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
 
     # Calculate processing time and update webhook log
     processing_time = int((time.time() - start_time) * 1000)
-    
+
     # Try to find realm_id from subscription if not already set
     discovered_realm_id = None
     stripe_sub_id_for_lookup = data.get("subscription") or data.get("id")
@@ -923,16 +874,16 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         ).first()
         if sub_for_realm:
             discovered_realm_id = sub_for_realm.realm_id
-    
+
     if webhook_log:
         webhook_log.status = "processed"
         webhook_log.processing_time_ms = processing_time
         if discovered_realm_id and not webhook_log.realm_id:
             webhook_log.realm_id = discovered_realm_id
         db.commit()
-    
+
     log_info(
-        db, 
+        db,
         source="stripe_webhook",
         action=event_type,
         message=f"Webhook {event_type} processed successfully in {processing_time}ms",

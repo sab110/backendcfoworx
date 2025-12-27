@@ -22,7 +22,7 @@ class User(Base):
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, onupdate=func.now())
 
-    # ✅ Fix: Reference QuickBooksToken instead of QuickBooksOAuth
+    # Fix: Reference QuickBooksToken instead of QuickBooksOAuth
     quickbooks_token = relationship(
         "QuickBooksToken",
         back_populates="user",
@@ -49,7 +49,7 @@ class QuickBooksToken(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # ✅ Add relationship back to User
+    # Add relationship back to User
     user = relationship("User", back_populates="quickbooks_token")
 
     def is_expired(self):

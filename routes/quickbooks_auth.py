@@ -16,6 +16,7 @@ import requests
 
 router = APIRouter()
 
+
 # ------------------------------------------------------
 # Helper to initialize the Intuit AuthClient
 # ------------------------------------------------------
@@ -48,15 +49,14 @@ async def oauth_callback(code: str, realmId: str, state: str = None):
     We forward the code and realmId to the frontend for token exchange.
     """
     from config import FRONTEND_URL
-    
+
     # Redirect to frontend with the authorization code and realmId
-    # frontend_callback_url = f"{FRONTEND_URL}/callback?code={code}&realmId={realmId}"
     frontend_callback_url = (
         f"{FRONTEND_URL}/quickbooks-oauth-callback?code={code}&realmId={realmId}"
     )
     if state:
         frontend_callback_url += f"&state={state}"
-    
+
     return RedirectResponse(frontend_callback_url)
 
 
@@ -75,10 +75,10 @@ async def store_qbo_oauth(payload: dict, db: Session = Depends(get_db)):
     auth_client = get_auth_client()
 
     try:
-        print(f"🔍 Exchanging code: {code} for realm_id: {realm_id}")
+        print(f"Exchanging code: {code} for realm_id: {realm_id}")
         auth_client.get_bearer_token(code, realm_id=realm_id)
 
-        # --- 1️⃣ Fetch user info from QuickBooks ---
+        # --- 1. Fetch user info from QuickBooks ---
         userinfo_endpoint = (
             "https://sandbox-accounts.platform.intuit.com/v1/openid_connect/userinfo"
             if ENVIRONMENT == "sandbox"
@@ -95,9 +95,9 @@ async def store_qbo_oauth(payload: dict, db: Session = Depends(get_db)):
             )
 
         user_data = response.json()
-        print("✅ QuickBooks User Info:", user_data)
+        print("QuickBooks User Info:", user_data)
 
-        # --- 2️⃣ Create or update user in your local DB ---
+        # --- 2. Create or update user in your local DB ---
         user = db.query(User).filter_by(id=user_id).first()
 
         full_name = f"{user_data.get('givenName', '')} {user_data.get('familyName', '')}".strip()
@@ -113,7 +113,7 @@ async def store_qbo_oauth(payload: dict, db: Session = Depends(get_db)):
             if hasattr(user, "phone"):
                 user.phone = phone
 
-        # --- 3️⃣ Create or update QuickBooksToken ---
+        # --- 3. Create or update QuickBooksToken ---
         token_entry = db.query(QuickBooksToken).filter_by(realm_id=realm_id).first()
         if token_entry:
             token_entry.access_token = auth_client.access_token
@@ -126,7 +126,7 @@ async def store_qbo_oauth(payload: dict, db: Session = Depends(get_db)):
             db.add(token_entry)
 
         db.commit()
-        
+
         # Log tenant activity
         try:
             from services.logging_service import log_tenant_activity
@@ -152,7 +152,7 @@ async def store_qbo_oauth(payload: dict, db: Session = Depends(get_db)):
 
     except Exception as e:
         db.rollback()
-        print("❌ OAuth processing error:", str(e))
+        print("OAuth processing error:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -173,7 +173,7 @@ async def refresh_qbo_token(realm_id: str, db: Session = Depends(get_db)):
         token_entry.expires_at = datetime.utcnow() + timedelta(seconds=3600)
         db.commit()
 
-        print(f"✅ Token refreshed for realm_id: {realm_id}")
+        print(f"Token refreshed for realm_id: {realm_id}")
         return {"access_token": auth_client.access_token}
     except Exception as e:
         db.rollback()
@@ -195,7 +195,7 @@ async def get_qbo_user(
 
     # --- Refresh if expired ---
     if token_entry.is_expired():
-        print(f"🔄 Token expired for {realm_id}, refreshing...")
+        print(f"Token expired for {realm_id}, refreshing...")
         try:
             auth_client = get_auth_client()
             auth_client.refresh(refresh_token=token_entry.refresh_token)
@@ -228,7 +228,7 @@ async def get_qbo_user(
         from models import CompanyInfo
         company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
         onboarding_completed = company.onboarding_completed == "true" if company else False
-        
+
         return {
             "full_name": f"{data.get('givenName', '')} {data.get('familyName', '')}".strip(),
             "email": data.get("email"),
@@ -259,7 +259,7 @@ async def fetch_company_info(realm_id: str, db: Session = Depends(get_db)):
 
     # --- Refresh if expired ---
     if token_entry.is_expired():
-        print(f"🔄 Token expired for {realm_id}, refreshing...")
+        print(f"Token expired for {realm_id}, refreshing...")
         try:
             auth_client = get_auth_client()
             auth_client.refresh(refresh_token=token_entry.refresh_token)
@@ -290,9 +290,9 @@ async def fetch_company_info(realm_id: str, db: Session = Depends(get_db)):
     }
 
     try:
-        print(f"🔍 Fetching company info for realm_id: {realm_id}")
+        print(f"Fetching company info for realm_id: {realm_id}")
         response = requests.get(company_info_url, headers=headers, params=params)
-        
+
         if response.status_code != 200:
             raise HTTPException(
                 status_code=response.status_code,
@@ -300,7 +300,7 @@ async def fetch_company_info(realm_id: str, db: Session = Depends(get_db)):
             )
 
         data = response.json()
-        print("✅ QuickBooks Company Info Response:", data)
+        print("QuickBooks Company Info Response:", data)
 
         # --- Extract CompanyInfo from response ---
         company_data = data.get("QueryResponse", {}).get("CompanyInfo", [])
@@ -405,8 +405,8 @@ async def fetch_company_info(realm_id: str, db: Session = Depends(get_db)):
                     user = db.query(User).filter_by(id=qb_token.user_id).first()
                     if user and user.email:
                         user_email = user.email
-                        print(f"📧 Found user email for welcome: {user_email}")
-                
+                        print(f"Found user email for welcome: {user_email}")
+
                 # Fallback to company email if no user email
                 email_to_use = user_email or company_info.email or company_info.customer_communication_email
                 company_name = company_info.company_name or "Your Company"
@@ -421,32 +421,32 @@ async def fetch_company_info(realm_id: str, db: Session = Depends(get_db)):
                     )
                     welcome_email_sent = result.get("success", False)
                     if welcome_email_sent:
-                        print(f"✅ Welcome email sent to {email_to_use}")
+                        print(f"Welcome email sent to {email_to_use}")
 
-                        # Auto-create email preference for the user email
-                        existing_pref = db.query(EmailPreference).filter_by(
-                            realm_id=realm_id, email=email_to_use
-                        ).first()
-                        if not existing_pref:
-                            email_pref = EmailPreference(
-                                realm_id=realm_id,
-                                email=email_to_use,
-                                label="Primary",
-                                is_primary="true",
-                                receive_reports="true",
-                                receive_billing="true",
-                                receive_notifications="true",
-                            )
-                            db.add(email_pref)
-                            db.commit()
-                            print(f"✅ Auto-created email preference for {email_to_use}")
+                    # Auto-create email preference for the user email
+                    existing_pref = db.query(EmailPreference).filter_by(
+                        realm_id=realm_id, email=email_to_use
+                    ).first()
+                    if not existing_pref:
+                        email_pref = EmailPreference(
+                            realm_id=realm_id,
+                            email=email_to_use,
+                            label="Primary",
+                            is_primary="true",
+                            receive_reports="true",
+                            receive_billing="true",
+                            receive_notifications="true",
+                        )
+                        db.add(email_pref)
+                        db.commit()
+                        print(f"Auto-created email preference for {email_to_use}")
                     else:
-                        print(f"⚠️ Failed to send welcome email: {result.get('error')}")
+                        print(f"Failed to send welcome email: {result.get('error')}")
                 else:
-                    print("⚠️ No email address available for welcome email")
+                    print("No email address available for welcome email")
             except Exception as email_error:
                 # Don't fail the whole operation if email fails
-                print(f"⚠️ Error sending welcome email: {str(email_error)}")
+                print(f"Error sending welcome email: {str(email_error)}")
 
         return {
             "message": "Company info fetched and stored successfully",
@@ -465,7 +465,7 @@ async def fetch_company_info(realm_id: str, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         db.rollback()
-        print("❌ Error fetching/storing company info:", str(e))
+        print("Error fetching/storing company info:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -478,7 +478,7 @@ async def get_company_info(realm_id: str, db: Session = Depends(get_db)):
     Retrieves stored company information from the database.
     """
     company_info = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
-    
+
     if not company_info:
         raise HTTPException(
             status_code=404,

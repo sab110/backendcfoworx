@@ -69,7 +69,7 @@ def refresh_token_if_expired(token_entry: QuickBooksToken, db: Session) -> str:
     Updates both access_token and refresh_token in database.
     """
     if token_entry.is_expired():
-        print(f"🔄 Token expired for realm_id: {token_entry.realm_id}, refreshing...")
+        print(f"Token expired for realm_id: {token_entry.realm_id}, refreshing...")
         try:
             auth_client = get_auth_client()
             auth_client.refresh(refresh_token=token_entry.refresh_token)
@@ -81,7 +81,7 @@ def refresh_token_if_expired(token_entry: QuickBooksToken, db: Session) -> str:
             token_entry.updated_at = datetime.utcnow()
             db.commit()
             
-            print(f"✅ Token refreshed successfully for realm_id: {token_entry.realm_id}")
+            print(f"Token refreshed successfully for realm_id: {token_entry.realm_id}")
         except Exception as e:
             db.rollback()
             raise HTTPException(
@@ -128,7 +128,7 @@ def query_class_ids(realm_id: str, access_token: str) -> list:
         response = requests.get(url, headers=headers, params=params)
         
         if response.status_code != 200:
-            print(f"⚠️ Class query failed: {response.status_code} - {response.text}")
+            print(f"Warning: Class query failed: {response.status_code} - {response.text}")
             return []
         
         data = response.json()
@@ -143,11 +143,11 @@ def query_class_ids(realm_id: str, access_token: str) -> list:
             if name.lower() in target_names_lower:
                 matching_ids.append(cls.get("Id"))
         
-        print(f"✅ Found {len(matching_ids)} matching class IDs: {matching_ids}")
+        print(f"Found {len(matching_ids)} matching class IDs: {matching_ids}")
         return matching_ids
         
     except Exception as e:
-        print(f"❌ Error querying classes: {str(e)}")
+        print(f"Error querying classes: {str(e)}")
         return []
 
 
@@ -211,7 +211,7 @@ def fetch_class_sales_report(
         params["start_date"] = ytd_start.strftime("%Y-%m-%d")
         params["end_date"] = last_month_end.strftime("%Y-%m-%d")
     
-    print(f"📊 Fetching {report_type} ClassSales report with params: {params}")
+    print(f"Fetching {report_type} ClassSales report with params: {params}")
     
     try:
         response = requests.get(url, headers=headers, params=params)
@@ -223,7 +223,7 @@ def fetch_class_sales_report(
             )
         
         data = response.json()
-        print(f"✅ Successfully fetched {report_type} report")
+        print(f"Successfully fetched {report_type} report")
         return data
         
     except HTTPException:
@@ -352,7 +352,7 @@ async def generate_rvcr_report(
     realm_id = request.realm_id
     department_id = request.department_id
     
-    print(f"🚀 Starting RVCR generation for realm_id: {realm_id}, department_id: {department_id}")
+    print(f"Starting RVCR generation for realm_id: {realm_id}, department_id: {department_id}")
     
     try:
         # 1. Get and validate QuickBooks token
@@ -381,7 +381,7 @@ async def generate_rvcr_report(
         franchise_number = license_mapping.franchise_number
         department_name = license_mapping.qbo_department_name
         
-        print(f"📋 Found license mapping: franchise={franchise_number}, department={department_name}")
+        print(f"Found license mapping: franchise={franchise_number}, department={department_name}")
         
         # 4. Get company info (for group/company name)
         company_info = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
@@ -392,7 +392,7 @@ async def generate_rvcr_report(
             )
         
         main_group_name = company_info.company_name or "Company"
-        print(f"🏢 Company: {main_group_name}")
+        print(f"Company: {main_group_name}")
         
         # 5. Query class IDs from QuickBooks
         class_ids = query_class_ids(realm_id, access_token)
@@ -403,7 +403,7 @@ async def generate_rvcr_report(
         period_start = datetime(last_month.year, last_month.month, 1).strftime("%Y-%m-%d")
         period_end = (datetime(last_month.year, last_month.month, 1) + relativedelta(months=1) - timedelta(days=1)).strftime("%Y-%m-%d")
         
-        print(f"📅 Report period: {period_start} to {period_end}")
+        print(f"Report period: {period_start} to {period_end}")
         
         # 7. Fetch Last Month report (uses start_date and end_date)
         last_month_data = fetch_class_sales_report(
@@ -431,7 +431,7 @@ async def generate_rvcr_report(
         report_name = generate_report_name(franchise_number, period_end)
         report_title = f"RVCR - {department_name}"
         
-        print(f"📝 Report name: {report_name}")
+        print(f"Report name: {report_name}")
         
         # 8. Save JSON data to temp files
         temp_dir = tempfile.mkdtemp()
@@ -461,9 +461,9 @@ async def generate_rvcr_report(
                 department_name=department_name,
                 main_group_name=main_group_name
             )
-            print(f"✅ Excel report generated: {excel_path}")
+            print(f"Excel report generated: {excel_path}")
         except Exception as gen_error:
-            print(f"❌ Excel generation error: {str(gen_error)}")
+            print(f"Excel generation error: {str(gen_error)}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Report generation failed: {str(gen_error)}"
@@ -473,9 +473,9 @@ async def generate_rvcr_report(
         try:
             pdf_path = generator.convert_to_pdf(excel_path)
             pdf_available = True
-            print(f"✅ PDF report generated: {pdf_path}")
+            print(f"PDF report generated: {pdf_path}")
         except Exception as pdf_error:
-            print(f"⚠️ PDF conversion skipped (not available in this environment): {str(pdf_error)}")
+            print(f"PDF conversion skipped (not available in this environment): {str(pdf_error)}")
             pdf_available = False
         
         # 10. Upload to Azure Storage
@@ -495,7 +495,7 @@ async def generate_rvcr_report(
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             ext="xlsx"
         )
-        print(f"☁️ Excel uploaded: {excel_blob_name}")
+        print(f"Excel uploaded: {excel_blob_name}")
         
         # Upload PDF only if available
         pdf_blob_url = None
@@ -513,9 +513,9 @@ async def generate_rvcr_report(
                 content_type="application/pdf",
                 ext="pdf"
             )
-            print(f"☁️ PDF uploaded: {pdf_blob_name}")
+            print(f"PDF uploaded: {pdf_blob_name}")
         else:
-            print(f"ℹ️ PDF upload skipped (not available)")
+            print(f"PDF upload skipped (not available)")
         
         # 11. Get period_month in mmyyyy format
         try:
@@ -548,7 +548,7 @@ async def generate_rvcr_report(
         db.commit()
         db.refresh(generated_report)
         
-        print(f"💾 Report record saved: ID={generated_report.id}")
+        print(f"Report record saved: ID={generated_report.id}")
         
         # 13. Generate SAS URLs for download
         excel_sas_url = storage.generate_sas_url(excel_blob_name)  # Default 10 years expiry
@@ -578,7 +578,7 @@ async def generate_rvcr_report(
                 os.remove(pdf_path)
             os.rmdir(temp_dir)
         except Exception as cleanup_error:
-            print(f"⚠️ Cleanup warning: {cleanup_error}")
+            print(f"Cleanup warning: {cleanup_error}")
         
         # Build response message
         if pdf_available:
@@ -620,7 +620,7 @@ async def generate_rvcr_report(
         raise
     except Exception as e:
         db.rollback()
-        print(f"❌ RVCR generation error: {str(e)}")
+        print(f"RVCR generation error: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(

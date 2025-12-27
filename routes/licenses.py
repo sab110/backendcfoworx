@@ -22,65 +22,66 @@ async def sync_subscription_quantity(db: Session, realm_id: str):
         # Get subscription
         subscription = db.query(Subscription).filter(Subscription.realm_id == realm_id).first()
         if not subscription or not subscription.stripe_subscription_id:
-            print(f"⚠️ No subscription found for {realm_id}, skipping sync")
+            print(f"No subscription found for {realm_id}, skipping sync")
             return None
-        
+
         if subscription.status != "active":
-            print(f"⚠️ Subscription not active for {realm_id}, skipping sync")
+            print(f"Subscription not active for {realm_id}, skipping sync")
             return None
-        
+
         # Count active licenses
         active_count = db.query(CompanyLicenseMapping).filter(
             CompanyLicenseMapping.realm_id == realm_id,
             CompanyLicenseMapping.is_active == "true"
         ).count()
-        
+
         if active_count < 1:
-            print(f"⚠️ No active licenses for {realm_id}, keeping at least 1")
+            print(f"No active licenses for {realm_id}, keeping at least 1")
             active_count = 1
-        
+
         # Check if update is needed
         if subscription.quantity == active_count:
-            print(f"ℹ️ Subscription quantity already {active_count} for {realm_id}")
+            print(f"Subscription quantity already {active_count} for {realm_id}")
             return {"no_change": True, "quantity": active_count}
-        
+
         old_quantity = subscription.quantity or 0
-        
+
         # Update Stripe subscription
         stripe_sub = stripe.Subscription.retrieve(subscription.stripe_subscription_id)
-        
+
         if not stripe_sub.get("items") or not stripe_sub["items"].get("data"):
-            print(f"❌ Could not retrieve subscription items for {realm_id}")
+            print(f"Could not retrieve subscription items for {realm_id}")
             return None
-        
+
         item_id = stripe_sub["items"]["data"][0]["id"]
-        
+
         # Update the quantity with proration
         stripe.SubscriptionItem.modify(
             item_id,
             quantity=active_count,
             proration_behavior="create_prorations"
         )
-        
+
         # Update local database
         subscription.quantity = active_count
         subscription.updated_at = datetime.utcnow()
         db.commit()
-        
-        print(f"✅ Updated subscription for {realm_id}: {old_quantity} → {active_count} licenses")
-        
+
+        print(f"Updated subscription for {realm_id}: {old_quantity} -> {active_count} licenses")
+
         return {
             "success": True,
             "old_quantity": old_quantity,
             "new_quantity": active_count
         }
-        
+
     except stripe.error.StripeError as e:
-        print(f"❌ Stripe error syncing subscription for {realm_id}: {str(e)}")
+        print(f"Stripe error syncing subscription for {realm_id}: {str(e)}")
         return {"error": str(e)}
     except Exception as e:
-        print(f"❌ Error syncing subscription for {realm_id}: {str(e)}")
+        print(f"Error syncing subscription for {realm_id}: {str(e)}")
         return {"error": str(e)}
+
 
 router = APIRouter()
 
@@ -122,7 +123,7 @@ async def create_license(license_data: LicenseCreate, db: Session = Depends(get_
             status_code=400,
             detail=f"License with franchise number {license_data.franchise_number} already exists"
         )
-    
+
     # Create new license
     new_license = License(
         franchise_number=license_data.franchise_number,
@@ -133,11 +134,11 @@ async def create_license(license_data: LicenseCreate, db: Session = Depends(get_
         state=license_data.state.upper() if license_data.state else None,
         zip_code=license_data.zip_code,
     )
-    
+
     db.add(new_license)
     db.commit()
     db.refresh(new_license)
-    
+
     return {
         "message": "License created successfully",
         "license": {
@@ -172,7 +173,7 @@ async def update_license(
             status_code=404,
             detail=f"License not found for franchise number: {franchise_number}"
         )
-    
+
     # Update fields if provided
     if license_data.name is not None:
         license_entry.name = license_data.name
@@ -186,11 +187,11 @@ async def update_license(
         license_entry.state = license_data.state.upper()
     if license_data.zip_code is not None:
         license_entry.zip_code = license_data.zip_code
-    
+
     license_entry.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(license_entry)
-    
+
     return {
         "message": "License updated successfully",
         "license": {
@@ -222,16 +223,16 @@ async def delete_license(franchise_number: str, db: Session = Depends(get_db)):
             status_code=404,
             detail=f"License not found for franchise number: {franchise_number}"
         )
-    
+
     # Delete any mappings associated with this license
     mappings_deleted = db.query(CompanyLicenseMapping).filter_by(
         franchise_number=franchise_number
     ).delete()
-    
+
     # Delete the license
     db.delete(license_entry)
     db.commit()
-    
+
     return {
         "message": f"License {franchise_number} deleted successfully",
         "franchise_number": franchise_number,
@@ -254,22 +255,22 @@ async def bulk_create_licenses(
     licenses_data = payload.get("licenses", [])
     if not licenses_data:
         raise HTTPException(status_code=400, detail="No licenses provided")
-    
+
     created = []
     skipped = []
-    
+
     for lic_data in licenses_data:
         franchise_number = lic_data.get("franchise_number")
         if not franchise_number:
             skipped.append({"data": lic_data, "reason": "Missing franchise_number"})
             continue
-        
+
         # Check if already exists
         existing = db.query(License).filter_by(franchise_number=franchise_number).first()
         if existing:
             skipped.append({"franchise_number": franchise_number, "reason": "Already exists"})
             continue
-        
+
         # Create new license
         new_license = License(
             franchise_number=franchise_number,
@@ -282,9 +283,9 @@ async def bulk_create_licenses(
         )
         db.add(new_license)
         created.append(franchise_number)
-    
+
     db.commit()
-    
+
     return {
         "message": f"Bulk create completed. Created: {len(created)}, Skipped: {len(skipped)}",
         "created": created,
@@ -303,7 +304,7 @@ async def get_all_licenses(
     """
     total = db.query(License).count()
     licenses = db.query(License).offset(skip).limit(limit).all()
-    
+
     results = []
     for lic in licenses:
         results.append({
@@ -318,7 +319,7 @@ async def get_all_licenses(
             "created_at": lic.created_at.isoformat() if lic.created_at else None,
             "updated_at": lic.updated_at.isoformat() if lic.updated_at else None
         })
-    
+
     return {
         "total": total,
         "skip": skip,
@@ -336,7 +337,7 @@ async def search_licenses(
     Search licenses by franchise number, name, owner, city, or state
     """
     search_pattern = f"%{query}%"
-    
+
     licenses = db.query(License).filter(
         (License.franchise_number.ilike(search_pattern)) |
         (License.name.ilike(search_pattern)) |
@@ -344,7 +345,7 @@ async def search_licenses(
         (License.city.ilike(search_pattern)) |
         (License.state.ilike(search_pattern))
     ).limit(50).all()
-    
+
     results = []
     for lic in licenses:
         results.append({
@@ -357,7 +358,7 @@ async def search_licenses(
             "state": lic.state,
             "zip_code": lic.zip_code
         })
-    
+
     return {
         "query": query,
         "count": len(results),
@@ -376,13 +377,13 @@ async def get_license_by_number(
     license = db.query(License).filter(
         License.franchise_number == franchise_number
     ).first()
-    
+
     if not license:
         raise HTTPException(
             status_code=404,
             detail=f"License not found for franchise number: {franchise_number}"
         )
-    
+
     return {
         "id": license.id,
         "franchise_number": license.franchise_number,
@@ -408,7 +409,7 @@ async def get_licenses_by_state(
     licenses = db.query(License).filter(
         License.state == state_code.upper()
     ).all()
-    
+
     results = []
     for lic in licenses:
         results.append({
@@ -419,7 +420,7 @@ async def get_licenses_by_state(
             "city": lic.city,
             "state": lic.state
         })
-    
+
     return {
         "state": state_code.upper(),
         "count": len(results),
@@ -442,18 +443,18 @@ async def save_selected_licenses(
     Also marks company onboarding as completed.
     """
     selected_franchise_numbers = payload.get("franchise_numbers", [])
-    
+
     if not selected_franchise_numbers:
         raise HTTPException(status_code=400, detail="No franchise numbers provided")
-    
+
     # Verify company exists
     company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
-    
+
     # Get all mappings for this company
     all_mappings = db.query(CompanyLicenseMapping).filter_by(realm_id=realm_id).all()
-    
+
     # Update is_active status based on selection
     updated_count = 0
     for mapping in all_mappings:
@@ -462,23 +463,23 @@ async def save_selected_licenses(
             updated_count += 1
         else:
             mapping.is_active = "false"
-    
+
     # Mark onboarding as completed for this company
     onboarding_just_completed = False
     if company.onboarding_completed != "true":
         company.onboarding_completed = "true"
         company.onboarding_completed_at = datetime.utcnow()
         onboarding_just_completed = True
-        print(f"✅ Onboarding completed for company: {company.company_name} (realm_id: {realm_id})")
-    
+        print(f"Onboarding completed for company: {company.company_name} (realm_id: {realm_id})")
+
     db.commit()
-    
+
     # Send onboarding completion email
     if onboarding_just_completed:
         try:
             from services.email_service import email_service
             from models import EmailPreference
-            
+
             # First, get the USER email (the person who signed in)
             qb_token = db.query(QuickBooksToken).filter_by(realm_id=realm_id).first()
             user_email = None
@@ -487,107 +488,107 @@ async def save_selected_licenses(
                 user = db.query(User).filter_by(id=qb_token.user_id).first()
                 if user and user.email:
                     user_email = user.email
-                    print(f"📧 Found user email for onboarding: {user_email}")
-            
+                    print(f"Found user email for onboarding: {user_email}")
+
             # Get email preference recipients
             email_prefs = db.query(EmailPreference).filter(
                 EmailPreference.realm_id == realm_id,
                 EmailPreference.receive_notifications == "true"
             ).all()
-            
+
             recipients = [pref.email for pref in email_prefs]
-            
+
             # Add user email if not already in recipients
             if user_email and user_email not in recipients:
                 recipients.insert(0, user_email)  # Put user email first
-            
+
             # Fallback to company email if no recipients
             if not recipients:
                 if company.email:
                     recipients = [company.email]
                 elif company.customer_communication_email:
                     recipients = [company.customer_communication_email]
-            
+
             if recipients:
                 from config import FRONTEND_URL
                 company_name = company.company_name or "Your Company"
-                
+
                 html = f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <meta charset="utf-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                </head>
-                <body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f5f5f5;">
-                    <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-                        <div style="background-color: #1a365d; padding: 30px; text-align: center;">
-                            <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
-                                CFO Worx
-                            </h1>
-                        </div>
-                        <div style="background-color: #ffffff; padding: 40px 30px; border: 1px solid #e0e0e0; border-top: none;">
-                            <h2 style="color: #1a365d; font-size: 20px; font-weight: 600; margin: 0 0 20px 0;">
-                                Onboarding Complete
-                            </h2>
-                            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
-                                Dear {company_name} Team,
-                            </p>
-                            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
-                                Congratulations! Your CFO Worx account setup is now complete. Here's a summary of what has been configured:
-                            </p>
-                            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
-                                <tr>
-                                    <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666; width: 180px;">
-                                        <strong>QuickBooks Connection</strong>
-                                    </td>
-                                    <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #166534; font-weight: 600;">
-                                        Connected
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666;">
-                                        <strong>Franchise Locations</strong>
-                                    </td>
-                                    <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #333333;">
-                                        {updated_count} location(s) configured
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666;">
-                                        <strong>Department Mappings</strong>
-                                    </td>
-                                    <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #166534; font-weight: 600;">
-                                        Complete
-                                    </td>
-                                </tr>
-                            </table>
-                            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 20px 0;">
-                                You can now access your dashboard to generate royalty reports and manage your franchise data.
-                            </p>
-                            <div style="text-align: center; margin: 30px 0;">
-                                <a href="{FRONTEND_URL}/dashboard" 
-                                   style="display: inline-block; background-color: #1a365d; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 4px; font-weight: 600; font-size: 14px;">
-                                    Go to Dashboard
-                                </a>
-                            </div>
-                            <p style="color: #666666; font-size: 13px; line-height: 1.6; margin: 20px 0 0 0;">
-                                If you have any questions about using CFO Worx, please contact our support team.
-                            </p>
-                        </div>
-                        <div style="padding: 20px; text-align: center; border: 1px solid #e0e0e0; border-top: none; background-color: #fafafa;">
-                            <p style="color: #666666; font-size: 12px; margin: 0 0 5px 0;">
-                                CFO Worx - Royalty Management Solutions
-                            </p>
-                            <p style="color: #999999; font-size: 11px; margin: 0;">
-                                This is an automated message. Please do not reply directly to this email.
-                            </p>
-                        </div>
-                    </div>
-                </body>
-                </html>
-                """
-                
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: Arial, Helvetica, sans-serif; background-color: #f5f5f5;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+        <div style="background-color: #1a365d; padding: 30px; text-align: center;">
+            <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.5px;">
+                CFO Worx
+            </h1>
+        </div>
+        <div style="background-color: #ffffff; padding: 40px 30px; border: 1px solid #e0e0e0; border-top: none;">
+            <h2 style="color: #1a365d; font-size: 20px; font-weight: 600; margin: 0 0 20px 0;">
+                Onboarding Complete
+            </h2>
+            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                Dear {company_name} Team,
+            </p>
+            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                Congratulations! Your CFO Worx account setup is now complete. Here's a summary of what has been configured:
+            </p>
+            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                <tr>
+                    <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666; width: 180px;">
+                        <strong>QuickBooks Connection</strong>
+                    </td>
+                    <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #166534; font-weight: 600;">
+                        Connected
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666;">
+                        <strong>Franchise Locations</strong>
+                    </td>
+                    <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #333333;">
+                        {updated_count} location(s) configured
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px 15px; background-color: #f8f9fa; border: 1px solid #e0e0e0; font-size: 14px; color: #666666;">
+                        <strong>Department Mappings</strong>
+                    </td>
+                    <td style="padding: 10px 15px; border: 1px solid #e0e0e0; font-size: 14px; color: #166534; font-weight: 600;">
+                        Complete
+                    </td>
+                </tr>
+            </table>
+            <p style="color: #333333; font-size: 15px; line-height: 1.6; margin: 20px 0;">
+                You can now access your dashboard to generate royalty reports and manage your franchise data.
+            </p>
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{FRONTEND_URL}/dashboard" 
+                   style="display: inline-block; background-color: #1a365d; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 4px; font-weight: 600; font-size: 14px;">
+                    Go to Dashboard
+                </a>
+            </div>
+            <p style="color: #666666; font-size: 13px; line-height: 1.6; margin: 20px 0 0 0;">
+                If you have any questions about using CFO Worx, please contact our support team.
+            </p>
+        </div>
+        <div style="padding: 20px; text-align: center; border: 1px solid #e0e0e0; border-top: none; background-color: #fafafa;">
+            <p style="color: #666666; font-size: 12px; margin: 0 0 5px 0;">
+                CFO Worx - Royalty Management Solutions
+            </p>
+            <p style="color: #999999; font-size: 11px; margin: 0;">
+                This is an automated message. Please do not reply directly to this email.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
                 result = email_service.send_email(
                     to=recipients,
                     subject=f"Onboarding Complete - {company_name}",
@@ -597,15 +598,15 @@ async def save_selected_licenses(
                     email_type="notification",
                 )
                 if result.get("success"):
-                    print(f"✅ Onboarding completion email sent to {recipients}")
+                    print(f"Onboarding completion email sent to {recipients}")
                 else:
-                    print(f"⚠️ Failed to send onboarding email: {result.get('error')}")
+                    print(f"Failed to send onboarding email: {result.get('error')}")
         except Exception as e:
-            print(f"⚠️ Error sending onboarding completion email: {str(e)}")
-    
+            print(f"Error sending onboarding completion email: {str(e)}")
+
     # Automatically sync Stripe subscription quantity with active licenses
     sync_result = await sync_subscription_quantity(db, realm_id)
-    
+
     return {
         "message": "License selection saved successfully",
         "realm_id": realm_id,
@@ -626,20 +627,20 @@ async def get_selected_licenses(realm_id: str, db: Session = Depends(get_db)):
     company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
-    
+
     # Get active mappings
     mappings = db.query(CompanyLicenseMapping).filter_by(
         realm_id=realm_id,
         is_active="true"
     ).all()
-    
+
     # Build response
     licenses_data = []
     for mapping in mappings:
         license_entry = db.query(License).filter_by(
             franchise_number=mapping.franchise_number
         ).first()
-        
+
         if license_entry:
             licenses_data.append({
                 "franchise_number": license_entry.franchise_number,
@@ -652,7 +653,7 @@ async def get_selected_licenses(realm_id: str, db: Session = Depends(get_db)):
                     "is_active": mapping.is_active
                 }
             })
-    
+
     return {
         "realm_id": realm_id,
         "company_name": company.company_name,
@@ -677,13 +678,13 @@ async def get_license_mappings(realm_id: str, db: Session = Depends(get_db)):
             status_code=404,
             detail="Company not found. Please fetch company info first."
         )
-    
+
     # Get all active mappings for this company
     mappings = db.query(CompanyLicenseMapping).filter_by(
         realm_id=realm_id,
         is_active="true"
     ).all()
-    
+
     # Build response
     mappings_data = []
     for mapping in mappings:
@@ -695,7 +696,7 @@ async def get_license_mappings(realm_id: str, db: Session = Depends(get_db)):
             "qbo_department_name": mapping.qbo_department_name,
             "is_active": mapping.is_active,
         })
-    
+
     return {
         "status": "success",
         "realm_id": realm_id,
@@ -735,7 +736,7 @@ async def map_company_licenses(realm_id: str, db: Session = Depends(get_db)):
 
     # --- 2. Refresh token if expired ---
     if token_entry.is_expired():
-        print(f"🔄 Token expired for {realm_id}, refreshing...")
+        print(f"Token expired for {realm_id}, refreshing...")
         from routes.quickbooks_auth import get_auth_client
         try:
             auth_client = get_auth_client()
@@ -767,9 +768,9 @@ async def map_company_licenses(realm_id: str, db: Session = Depends(get_db)):
     }
 
     try:
-        print(f"🔍 Fetching departments for realm_id: {realm_id}")
+        print(f"Fetching departments for realm_id: {realm_id}")
         response = requests.get(departments_url, headers=headers, params=params)
-        
+
         if response.status_code != 200:
             raise HTTPException(
                 status_code=response.status_code,
@@ -777,7 +778,7 @@ async def map_company_licenses(realm_id: str, db: Session = Depends(get_db)):
             )
 
         data = response.json()
-        print("✅ QuickBooks Departments Response received")
+        print("QuickBooks Departments Response received")
 
         # --- 5. Extract departments from response ---
         departments = data.get("QueryResponse", {}).get("Department", [])
@@ -798,10 +799,10 @@ async def map_company_licenses(realm_id: str, db: Session = Depends(get_db)):
             dept_name = dept.get("Name", "")
             dept_id = dept.get("Id", "")
             is_active = dept.get("Active", True)
-            
+
             # Extract franchise number from department name
             franchise_number = extract_franchise_number(dept_name)
-            
+
             if not franchise_number:
                 skipped_count += 1
                 mapping_details.append({
@@ -810,10 +811,10 @@ async def map_company_licenses(realm_id: str, db: Session = Depends(get_db)):
                     "reason": "No franchise number found in name"
                 })
                 continue
-            
+
             # Check if license exists in database
             license_entry = db.query(License).filter_by(franchise_number=franchise_number).first()
-            
+
             if not license_entry:
                 skipped_count += 1
                 mapping_details.append({
@@ -823,13 +824,13 @@ async def map_company_licenses(realm_id: str, db: Session = Depends(get_db)):
                     "reason": "License not found in database"
                 })
                 continue
-            
+
             # Create or update mapping
             mapping = db.query(CompanyLicenseMapping).filter_by(
                 realm_id=realm_id,
                 franchise_number=franchise_number
             ).first()
-            
+
             if mapping:
                 # Update existing mapping
                 mapping.qbo_department_id = dept_id
@@ -850,7 +851,7 @@ async def map_company_licenses(realm_id: str, db: Session = Depends(get_db)):
                 )
                 db.add(mapping)
                 status = "created"
-            
+
             mapped_count += 1
             mapping_details.append({
                 "department_name": dept_name,
@@ -875,7 +876,7 @@ async def map_company_licenses(realm_id: str, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         db.rollback()
-        print("❌ Error mapping licenses:", str(e))
+        print("Error mapping licenses:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -895,19 +896,19 @@ async def get_company_licenses(realm_id: str, db: Session = Depends(get_db)):
 
     # Get all mappings for this company
     mappings = db.query(CompanyLicenseMapping).filter_by(realm_id=realm_id).all()
-    
+
     # If no mappings exist, automatically fetch and map departments
     if not mappings:
-        print(f"🔄 No mappings found for {realm_id}. Auto-fetching departments...")
-        
+        print(f"No mappings found for {realm_id}. Auto-fetching departments...")
+
         try:
             # Call the mapping function to fetch and create mappings
             mapping_result = await map_company_licenses(realm_id, db)
-            
+
             # If mapping was successful, fetch the mappings again
             if mapping_result.get("mapped", 0) > 0:
                 mappings = db.query(CompanyLicenseMapping).filter_by(realm_id=realm_id).all()
-                print(f"✅ Auto-mapped {mapping_result['mapped']} licenses")
+                print(f"Auto-mapped {mapping_result['mapped']} licenses")
             else:
                 # No departments found or mapped
                 return {
@@ -920,7 +921,7 @@ async def get_company_licenses(realm_id: str, db: Session = Depends(get_db)):
                     "licenses": []
                 }
         except Exception as e:
-            print(f"❌ Auto-mapping failed: {str(e)}")
+            print(f"Auto-mapping failed: {str(e)}")
             # Return empty result with error info
             return {
                 "realm_id": realm_id,
@@ -938,7 +939,7 @@ async def get_company_licenses(realm_id: str, db: Session = Depends(get_db)):
         license_entry = db.query(License).filter_by(
             franchise_number=mapping.franchise_number
         ).first()
-        
+
         if license_entry:
             licenses_data.append({
                 "franchise_number": license_entry.franchise_number,
@@ -986,22 +987,22 @@ async def update_company_license_mapping(
     company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
-    
+
     # Find the mapping
     mapping = db.query(CompanyLicenseMapping).filter_by(
         realm_id=realm_id,
         franchise_number=franchise_number
     ).first()
-    
+
     if not mapping:
         raise HTTPException(
             status_code=404,
             detail=f"License mapping not found for franchise {franchise_number}"
         )
-    
+
     # Update the mapping
     old_is_active = mapping.is_active
-    
+
     if "is_active" in payload:
         # Handle both boolean and string values
         is_active_value = payload["is_active"]
@@ -1009,10 +1010,10 @@ async def update_company_license_mapping(
             mapping.is_active = "true" if is_active_value.lower() == "true" else "false"
         else:
             mapping.is_active = "true" if is_active_value else "false"
-    
+
     mapping.updated_at = datetime.utcnow()
     db.commit()
-    
+
     # Log tenant activity and sync subscription if status changed
     sync_result = None
     if old_is_active != mapping.is_active:
@@ -1029,10 +1030,10 @@ async def update_company_license_mapping(
             )
         except Exception as log_err:
             print(f"Failed to log tenant activity: {log_err}")
-        
+
         # Automatically sync Stripe subscription quantity
         sync_result = await sync_subscription_quantity(db, realm_id)
-    
+
     return {
         "message": f"License mapping for {franchise_number} updated",
         "franchise_number": franchise_number,
@@ -1058,11 +1059,11 @@ async def add_license_to_company(
     company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
-    
+
     franchise_number = payload.get("franchise_number")
     if not franchise_number:
         raise HTTPException(status_code=400, detail="franchise_number is required")
-    
+
     # Check if license exists in database
     license_entry = db.query(License).filter_by(franchise_number=franchise_number).first()
     if not license_entry:
@@ -1070,13 +1071,13 @@ async def add_license_to_company(
             status_code=404,
             detail=f"License {franchise_number} not found in database. Create it first using /api/licenses/create"
         )
-    
+
     # Check if mapping already exists
     existing = db.query(CompanyLicenseMapping).filter_by(
         realm_id=realm_id,
         franchise_number=franchise_number
     ).first()
-    
+
     if existing:
         # Reactivate if it was deactivated
         existing.is_active = "true"
@@ -1086,7 +1087,7 @@ async def add_license_to_company(
             "message": f"License {franchise_number} reactivated for company",
             "action": "reactivated"
         }
-    
+
     # Create new mapping
     mapping = CompanyLicenseMapping(
         realm_id=realm_id,
@@ -1097,7 +1098,7 @@ async def add_license_to_company(
     )
     db.add(mapping)
     db.commit()
-    
+
     return {
         "message": f"License {franchise_number} added to company",
         "action": "created",
@@ -1127,24 +1128,24 @@ async def remove_license_from_company(
     company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
-    
+
     # Find the mapping
     mapping = db.query(CompanyLicenseMapping).filter_by(
         realm_id=realm_id,
         franchise_number=franchise_number
     ).first()
-    
+
     if not mapping:
         raise HTTPException(
             status_code=404,
             detail=f"License mapping not found for franchise {franchise_number}"
         )
-    
+
     # Deactivate the mapping
     mapping.is_active = "false"
     mapping.updated_at = datetime.utcnow()
     db.commit()
-    
+
     return {
         "message": f"License {franchise_number} removed from company",
         "franchise_number": franchise_number
@@ -1168,23 +1169,22 @@ async def permanently_delete_license_mapping(
     company = db.query(CompanyInfo).filter_by(realm_id=realm_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
-    
+
     # Find and delete the mapping
     deleted = db.query(CompanyLicenseMapping).filter_by(
         realm_id=realm_id,
         franchise_number=franchise_number
     ).delete()
-    
+
     if not deleted:
         raise HTTPException(
             status_code=404,
             detail=f"License mapping not found for franchise {franchise_number}"
         )
-    
+
     db.commit()
-    
+
     return {
         "message": f"License mapping for {franchise_number} permanently deleted",
         "franchise_number": franchise_number
     }
-
