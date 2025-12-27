@@ -703,16 +703,29 @@ def calculate_payment_summary(
 
 def generate_payment_summary_excel(summary: dict, output_path: str) -> str:
     """
-    Generate Payment Summary Excel file matching the SERVPRO format.
+    Generate Payment Summary Excel file matching the SERVPRO Royalty Reporting format.
+    Based on RR August.pdf template.
     """
+    from openpyxl.worksheet.page import PageMargins
+    
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.title = "Payment Summary Report"
+    ws.title = "Royalty Reporting"
+
+    # Page setup for PDF export - Landscape, fit to page
+    ws.page_setup.orientation = 'landscape'
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins = PageMargins(left=0.5, right=0.5, top=0.5, bottom=0.5)
+    ws.print_options.horizontalCentered = True
 
     # Styles
-    header_font = Font(bold=True, size=14)
-    section_font = Font(bold=True, size=11)
+    title_font = Font(bold=True, size=16, color="006400")  # Dark green for SERVPRO
+    header_font = Font(bold=True, size=12)
+    section_font = Font(bold=True, size=10)
     normal_font = Font(size=10)
+    small_font = Font(size=9)
 
     thin_border = Border(
         left=Side(style='thin'),
@@ -720,53 +733,95 @@ def generate_payment_summary_excel(summary: dict, output_path: str) -> str:
         top=Side(style='thin'),
         bottom=Side(style='thin')
     )
+    
+    bottom_border = Border(bottom=Side(style='thin'))
 
-    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
-    header_font_white = Font(bold=True, color="FFFFFF", size=11)
+    # Colors matching SERVPRO theme
+    green_fill = PatternFill(start_color="006400", end_color="006400", fill_type="solid")
+    light_green_fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
+    header_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
     yellow_fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
-    subtotal_fill = PatternFill(start_color="DCE6F1", end_color="DCE6F1", fill_type="solid")
+    light_gray_fill = PatternFill(start_color="F5F5F5", end_color="F5F5F5", fill_type="solid")
+    white_font = Font(bold=True, color="FFFFFF", size=11)
 
-    # Column widths
-    ws.column_dimensions['A'].width = 50
-    ws.column_dimensions['B'].width = 15
-    ws.column_dimensions['C'].width = 18
-    ws.column_dimensions['D'].width = 18
-    ws.column_dimensions['E'].width = 18
+    # Column widths - optimized for landscape with owner name fitting
+    ws.column_dimensions['A'].width = 50  # Category names (long subtotals)
+    ws.column_dimensions['B'].width = 15  # Commercial:/Residential: labels
+    ws.column_dimensions['C'].width = 20  # Revenue This Month
+    ws.column_dimensions['D'].width = 20  # Year To Date
+    ws.column_dimensions['E'].width = 35  # Royalty Payable / Owner name
 
     row = 1
 
-    # Header section - "Royalty Reporting" to match SERVPRO format
+    # ===== HEADER SECTION =====
+    # Title bar with SERVPRO green
     ws.merge_cells('A1:E1')
-    header_cell = ws.cell(row=row, column=1, value="Royalty Reporting")
-    header_cell.font = header_font
-    header_cell.alignment = Alignment(horizontal='center')
+    title_cell = ws.cell(row=row, column=1, value="SERVPRO - Royalty Reporting")
+    title_cell.font = Font(bold=True, size=16, color="FFFFFF")
+    title_cell.fill = green_fill
+    title_cell.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[row].height = 30
     row += 2
 
-    # Franchise info - matching SERVPRO format
-    ws.cell(row=row, column=1, value="Franchise:")
-    ws.cell(row=row, column=2, value=f"{summary['franchise_number']}   {summary['department_name']}")
-    ws.cell(row=row, column=4, value="Owner:")
-    ws.cell(row=row, column=5, value=summary.get("owner_name", ""))
+    # Franchise info section with borders - two-row layout
+    info_start_row = row
+    
+    # Row 1: Franchise and Owner (side by side)
+    # Franchise section (columns A-C)
+    ws.cell(row=row, column=1, value="Franchise:").font = section_font
+    ws.merge_cells(f'B{row}:C{row}')
+    franchise_cell = ws.cell(row=row, column=2, value=f"{summary['franchise_number']}   {summary['department_name']}")
+    franchise_cell.font = normal_font
+    
+    # Owner section (columns D-E)
+    ws.cell(row=row, column=4, value="Owner:").font = section_font
+    owner_name = summary.get("owner_name", "")
+    owner_cell = ws.cell(row=row, column=5, value=owner_name)
+    # Use smaller font for long owner names
+    if len(owner_name) > 40:
+        owner_cell.font = Font(size=8)
+    else:
+        owner_cell.font = normal_font
+    owner_cell.alignment = Alignment(horizontal='left', shrink_to_fit=True)
     row += 1
 
+    # Row 2: Month/Year and Date of Mailing
     month_name = datetime(2000, summary["period_month"], 1).strftime("%m") if summary["period_month"] else "N/A"
-    ws.cell(row=row, column=1, value="Month/Year:")
-    ws.cell(row=row, column=2, value=f"{month_name}/{summary['period_year']}")
-    ws.cell(row=row, column=4, value="Date of Mailing:")
-    ws.cell(row=row, column=5, value=datetime.now().strftime("%m/%d/%Y"))
+    ws.cell(row=row, column=1, value="Month/Year:").font = section_font
+    ws.merge_cells(f'B{row}:C{row}')
+    ws.cell(row=row, column=2, value=f"{month_name}/{summary['period_year']}").font = normal_font
+    ws.cell(row=row, column=4, value="Date of Mailing:").font = section_font
+    ws.cell(row=row, column=5, value=datetime.now().strftime("%m/%d/%Y")).font = normal_font
+    row += 1
+
+    # Add light gray background to info section
+    for r in range(info_start_row, row):
+        for c in range(1, 6):
+            ws.cell(row=r, column=c).fill = light_gray_fill
+            ws.cell(row=r, column=c).border = thin_border
+
+    row += 1
+
+    # Upload instruction (smaller text)
+    ws.merge_cells(f'A{row}:E{row}')
+    instruction = ws.cell(row=row, column=1, 
+        value="Upload 1 copy of your RVCR, 1 copy of your ILRM and 1 copy of your RR to the SFTP site as per Bulletin 5660-F.")
+    instruction.font = Font(size=8, italic=True)
+    instruction.alignment = Alignment(horizontal='left')
     row += 2
 
-    # Column headers
+    # ===== COLUMN HEADERS =====
     headers = ["Category", "", "Revenue This Month", "Year To Date", "Royalty Payable"]
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=row, column=col, value=header)
-        cell.font = header_font_white
+        cell.font = Font(bold=True, size=10)
         cell.fill = header_fill
         cell.border = thin_border
-        cell.alignment = Alignment(horizontal='center')
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[row].height = 20
     row += 1
 
-    # Category data - matching SERVPRO format
+    # ===== CATEGORY DATA =====
     categories_config = [
         ("Water Restoration", "water", "standard"),
         ("Fire Restoration", "fire", "standard"),
@@ -779,33 +834,60 @@ def generate_payment_summary_excel(summary: dict, output_path: str) -> str:
     for cat_name, cat_key, rate_type in categories_config:
         cat_data = summary["categories"][cat_key]
 
-        # Category header
-        ws.cell(row=row, column=1, value=cat_name).font = section_font
+        # Category header row
+        cat_cell = ws.cell(row=row, column=1, value=cat_name)
+        cat_cell.font = section_font
+        for c in range(1, 6):
+            ws.cell(row=row, column=c).border = thin_border
         row += 1
 
-        # Commercial with Royalty
-        ws.cell(row=row, column=2, value="Commercial:")
+        # Commercial row
+        ws.cell(row=row, column=1, value="").border = thin_border
+        comm_label = ws.cell(row=row, column=2, value="Commercial:")
+        comm_label.font = normal_font
+        comm_label.border = thin_border
+        
         cell_rev = ws.cell(row=row, column=3, value=cat_data["commercial"]["this_month"])
         cell_rev.number_format = '#,##0.00'
         cell_rev.fill = yellow_fill
+        cell_rev.border = thin_border
+        cell_rev.alignment = Alignment(horizontal='right')
+        
         cell_ytd = ws.cell(row=row, column=4, value=cat_data["commercial"]["ytd"])
         cell_ytd.number_format = '$#,##0.00'
+        cell_ytd.border = thin_border
+        cell_ytd.alignment = Alignment(horizontal='right')
+        
         cell_royalty = ws.cell(row=row, column=5, value=cat_data["commercial"]["royalty"])
         cell_royalty.number_format = '$#,##0.00'
+        cell_royalty.border = thin_border
+        cell_royalty.alignment = Alignment(horizontal='right')
         row += 1
 
-        # Residential with Royalty
-        ws.cell(row=row, column=2, value="Residential:")
+        # Residential row
+        ws.cell(row=row, column=1, value="").border = thin_border
+        res_label = ws.cell(row=row, column=2, value="Residential:")
+        res_label.font = normal_font
+        res_label.border = thin_border
+        
         cell_rev = ws.cell(row=row, column=3, value=cat_data["residential"]["this_month"])
         cell_rev.number_format = '#,##0.00'
         cell_rev.fill = yellow_fill
+        cell_rev.border = thin_border
+        cell_rev.alignment = Alignment(horizontal='right')
+        
         cell_ytd = ws.cell(row=row, column=4, value=cat_data["residential"]["ytd"])
         cell_ytd.number_format = '$#,##0.00'
+        cell_ytd.border = thin_border
+        cell_ytd.alignment = Alignment(horizontal='right')
+        
         cell_royalty = ws.cell(row=row, column=5, value=cat_data["residential"]["royalty"])
         cell_royalty.number_format = '$#,##0.00'
+        cell_royalty.border = thin_border
+        cell_royalty.alignment = Alignment(horizontal='right')
         row += 1
 
-    # Subtotals - matching SERVPRO format
+    # ===== SUBTOTALS =====
     subtotals = summary["subtotals"]
     royalties = summary["royalties"]
     fees = summary["fees"]
@@ -813,92 +895,211 @@ def generate_payment_summary_excel(summary: dict, output_path: str) -> str:
     # Standard Rate Subtotal
     cell = ws.cell(row=row, column=1, value="Subtotal: Standard Rate Services (Water, Fire, Mold/Bio Haz, Other)")
     cell.font = section_font
+    cell.border = thin_border
+    ws.cell(row=row, column=2, value="").border = thin_border
+    
     cell = ws.cell(row=row, column=3, value=subtotals["standard_rate"]["this_month"])
     cell.number_format = '$#,##0.00'
+    cell.font = section_font
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
+    
     cell = ws.cell(row=row, column=4, value=subtotals["standard_rate"]["ytd"])
     cell.number_format = '$#,##0.00'
+    cell.font = section_font
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
+    
     cell = ws.cell(row=row, column=5, value=royalties["standard_rate"]["amount"])
     cell.number_format = '$#,##0.00'
+    cell.font = section_font
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
     row += 1
 
     # Reduced Rate Subtotal
     cell = ws.cell(row=row, column=1, value="Subtotal: Reduced Rate Services (Subcontract, Reconstruction)")
     cell.font = section_font
+    cell.border = thin_border
+    ws.cell(row=row, column=2, value="").border = thin_border
+    
     cell = ws.cell(row=row, column=3, value=subtotals["reduced_rate"]["this_month"])
     cell.number_format = '$#,##0.00'
+    cell.font = section_font
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
+    
     cell = ws.cell(row=row, column=4, value=subtotals["reduced_rate"]["ytd"])
     cell.number_format = '$#,##0.00'
+    cell.font = section_font
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
+    
     cell = ws.cell(row=row, column=5, value=royalties["reduced_rate"]["amount"])
     cell.number_format = '$#,##0.00'
+    cell.font = section_font
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
     row += 1
 
-    # Total
+    # Total row with highlight
     cell = ws.cell(row=row, column=1, value="Total")
-    cell.font = section_font
+    cell.font = Font(bold=True, size=11)
+    cell.border = thin_border
+    cell.fill = light_green_fill
+    ws.cell(row=row, column=2, value="").border = thin_border
+    ws.cell(row=row, column=2).fill = light_green_fill
+    
     cell = ws.cell(row=row, column=3, value=subtotals["total"]["this_month"])
     cell.number_format = '$#,##0.00'
-    cell.font = section_font
+    cell.font = Font(bold=True, size=11)
+    cell.border = thin_border
+    cell.fill = light_green_fill
+    cell.alignment = Alignment(horizontal='right')
+    
     cell = ws.cell(row=row, column=4, value=subtotals["total"]["ytd"])
     cell.number_format = '$#,##0.00'
-    cell.font = section_font
+    cell.font = Font(bold=True, size=11)
+    cell.border = thin_border
+    cell.fill = light_green_fill
+    cell.alignment = Alignment(horizontal='right')
+    
     cell = ws.cell(row=row, column=5, value=royalties["total"])
     cell.number_format = '$#,##0.00'
-    cell.font = section_font
+    cell.font = Font(bold=True, size=11)
+    cell.border = thin_border
+    cell.fill = light_green_fill
+    cell.alignment = Alignment(horizontal='right')
     row += 1
 
+    # ===== FEES SECTION =====
     # Fixed Fee
-    ws.cell(row=row, column=1, value="Fixed Fee")
+    cell = ws.cell(row=row, column=1, value="Fixed Fee")
+    cell.border = thin_border
+    for c in range(2, 5):
+        ws.cell(row=row, column=c, value="").border = thin_border
     cell = ws.cell(row=row, column=5, value=fees["fixed_fee"])
     cell.number_format = '$#,##0.00'
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
     row += 1
 
     # National Accounts Fee
-    ws.cell(row=row, column=1, value="National Accounts Core/Regional Fee (0.5%)")
+    cell = ws.cell(row=row, column=1, value="National Accounts Core/Regional Fee (0.5%)")
+    cell.border = thin_border
+    for c in range(2, 5):
+        ws.cell(row=row, column=c, value="").border = thin_border
     cell = ws.cell(row=row, column=5, value=fees["national_accounts"])
     cell.number_format = '$#,##0.00'
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
     row += 1
 
     # National Brand Fund Fee
-    ws.cell(row=row, column=1, value="National Brand Fund Fee (2.5%)")
+    cell = ws.cell(row=row, column=1, value="National Brand Fund Fee (2.5%)")
+    cell.border = thin_border
+    for c in range(2, 5):
+        ws.cell(row=row, column=c, value="").border = thin_border
     cell = ws.cell(row=row, column=5, value=fees["national_brand_fund"]["amount"])
     cell.number_format = '$#,##0.00'
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
     row += 1
 
     # National Brand Fund Fee - Reduced Rate
-    ws.cell(row=row, column=1, value="National Brand Fund Fee - Reduced Rate Services (0.25%)")
+    cell = ws.cell(row=row, column=1, value="National Brand Fund Fee - Reduced Rate Services (0.25%)")
+    cell.border = thin_border
+    for c in range(2, 5):
+        ws.cell(row=row, column=c, value="").border = thin_border
     cell = ws.cell(row=row, column=5, value=fees["national_brand_reduced"])
     cell.number_format = '$#,##0.00'
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
     row += 1
 
-    # Royalty % And Fee Used section
+    # ===== ROYALTY CALCULATION SECTION =====
     std_royalty = royalties["standard_rate"]
     red_royalty = royalties["reduced_rate"]
 
-    ws.cell(row=row, column=1, value="Royalty % And Fee Used").font = section_font
-    ws.cell(row=row, column=4, value="Total Royalty, Fixed Fee,").font = section_font
+    # Royalty % And Fee Used header
+    cell = ws.cell(row=row, column=1, value="Royalty % And Fee Used")
+    cell.font = section_font
+    cell.border = thin_border
+    ws.cell(row=row, column=2, value="").border = thin_border
+    ws.cell(row=row, column=3, value="").border = thin_border
+    
+    cell = ws.cell(row=row, column=4, value="Total Royalty, Fixed Fee,")
+    cell.font = section_font
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
+    
     cell = ws.cell(row=row, column=5, value=summary["grand_total_payable"])
     cell.number_format = '$#,##0.00'
-    cell.font = section_font
+    cell.font = Font(bold=True, size=12)
+    cell.border = thin_border
+    cell.fill = light_green_fill
+    cell.alignment = Alignment(horizontal='right')
     row += 1
 
-    # Standard rate description
+    # Standard rate calculation description
     if std_royalty.get("is_minimum"):
-        ws.cell(row=row, column=1, value=f"Minimum royalty: ${MINIMUM_ROYALTY:.2f}")
+        calc_text = f"Minimum royalty: ${MINIMUM_ROYALTY:.2f}"
     else:
-        ws.cell(row=row, column=1, value=f"pay {std_royalty['description']}")
-    ws.cell(row=row, column=4, value="and Brand Fund Fee Payable").font = section_font
+        calc_text = f"pay {std_royalty['description']}"
+    
+    cell = ws.cell(row=row, column=1, value=calc_text)
+    cell.font = small_font
+    cell.border = thin_border
+    ws.cell(row=row, column=2, value="").border = thin_border
+    ws.cell(row=row, column=3, value="").border = thin_border
+    
+    cell = ws.cell(row=row, column=4, value="and Brand Fund Fee Payable")
+    cell.font = section_font
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
+    ws.cell(row=row, column=5, value="").border = thin_border
     row += 1
 
-    ws.cell(row=row, column=1, value=f"plus ${fees['fixed_fee']:.2f} Fixed Fee")
+    # Fixed fee line
+    cell = ws.cell(row=row, column=1, value=f"plus ${fees['fixed_fee']:.2f} Fixed Fee")
+    cell.font = small_font
+    cell.border = thin_border
+    for c in range(2, 6):
+        ws.cell(row=row, column=c, value="").border = thin_border
     row += 1
 
-    ws.cell(row=row, column=1, value=f"Reduced Rate Services pay {red_royalty['description']}")
-    row += 2
-
-    # Payment fields
-    ws.cell(row=row, column=4, value="Check Number:")
+    # Reduced rate description
+    cell = ws.cell(row=row, column=1, value=f"Reduced Rate Services pay {red_royalty['description']}")
+    cell.font = small_font
+    cell.border = thin_border
+    for c in range(2, 6):
+        ws.cell(row=row, column=c, value="").border = thin_border
     row += 1
-    ws.cell(row=row, column=4, value="Check Amount:")
+
+    # ===== CHECK FIELDS =====
+    ws.cell(row=row, column=1, value="").border = thin_border
+    ws.cell(row=row, column=2, value="").border = thin_border
+    ws.cell(row=row, column=3, value="").border = thin_border
+    cell = ws.cell(row=row, column=4, value="Check Number:")
+    cell.font = section_font
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
+    ws.cell(row=row, column=5, value="").border = thin_border
+    row += 1
+
+    ws.cell(row=row, column=1, value="").border = thin_border
+    ws.cell(row=row, column=2, value="").border = thin_border
+    ws.cell(row=row, column=3, value="").border = thin_border
+    cell = ws.cell(row=row, column=4, value="Check Amount:")
+    cell.font = section_font
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
+    cell = ws.cell(row=row, column=5, value="")  # Leave empty for user to fill
+    cell.border = thin_border
+    cell.alignment = Alignment(horizontal='right')
+
+    # Set print area
+    ws.print_area = f'A1:E{row}'
 
     # Save
     wb.save(output_path)
@@ -909,11 +1110,13 @@ def convert_excel_to_pdf(excel_path: str, pdf_path: str) -> bool:
     """
     Attempt to convert Excel to PDF using available methods.
     Returns True if successful, False otherwise.
+    PDF will be in landscape orientation with all columns fitting on page.
     """
     # Try LibreOffice first
     try:
         import subprocess
         output_dir = os.path.dirname(pdf_path)
+        # LibreOffice uses the page setup from the Excel file (landscape, fit to page)
         result = subprocess.run(
             ['libreoffice', '--headless', '--convert-to', 'pdf', '--outdir', output_dir, excel_path],
             capture_output=True,
@@ -932,7 +1135,20 @@ def convert_excel_to_pdf(excel_path: str, pdf_path: str) -> bool:
         import win32com.client
         excel = win32com.client.Dispatch("Excel.Application")
         excel.Visible = False
+        excel.DisplayAlerts = False
         wb = excel.Workbooks.Open(os.path.abspath(excel_path))
+        
+        # Set page setup for landscape and fit to page
+        ws = wb.ActiveSheet
+        ws.PageSetup.Orientation = 2  # xlLandscape
+        ws.PageSetup.Zoom = False
+        ws.PageSetup.FitToPagesWide = 1
+        ws.PageSetup.FitToPagesTall = False
+        ws.PageSetup.LeftMargin = excel.InchesToPoints(0.5)
+        ws.PageSetup.RightMargin = excel.InchesToPoints(0.5)
+        ws.PageSetup.TopMargin = excel.InchesToPoints(0.5)
+        ws.PageSetup.BottomMargin = excel.InchesToPoints(0.5)
+        
         wb.ExportAsFixedFormat(0, os.path.abspath(pdf_path))
         wb.Close(False)
         excel.Quit()
@@ -956,7 +1172,7 @@ def main():
     # Define file paths
     last_month_file = r"Royalty Calculation\rvcrsep.json"  # Result from Last Month API call
     ytd_file = r"Royalty Calculation\rvcrsepytd.json"  # Result from YTD API call
-    output_file = r"Royalty Calculation\Generated_Payment_Summary_Test_3.xlsx"
+    output_file = r"Royalty Calculation\Generated_Payment_Summary_SERVPRO_Format.xlsx"
     
     # Report configuration
     franchise_number = "11533"
